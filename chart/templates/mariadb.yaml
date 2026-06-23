@@ -1,0 +1,33 @@
+{{- if .Values.mariadb.enabled }}
+# Managed by mariadb-operator (the operator + CRDs MUST be installed first).
+# Root + MISP user passwords come from the chart secret; MISP reuses mysql-password.
+apiVersion: k8s.mariadb.com/v1alpha1
+kind: MariaDB
+metadata:
+  name: {{ include "misp.mariadb.fullname" . }}
+  labels:
+    app.kubernetes.io/component: mariadb
+    {{- include "misp.labels" . | nindent 4 }}
+spec:
+  rootPasswordSecretKeyRef:
+    name: {{ include "misp.secretName" . }}
+    key: mysql-root-password
+  username: {{ .Values.mariadb.username | quote }}
+  passwordSecretKeyRef:
+    name: {{ include "misp.secretName" . }}
+    key: mysql-password
+  database: {{ .Values.mariadb.database | quote }}
+  image: {{ .Values.mariadb.image | quote }}
+  port: 3306
+  storage:
+    size: {{ .Values.mariadb.storage.size | quote }}
+    {{- with .Values.mariadb.storage.storageClassName }}
+    storageClassName: {{ . | quote }}
+    {{- end }}
+  {{- with .Values.mariadb.myCnf }}
+  myCnf: |
+    {{- . | nindent 4 }}
+  {{- end }}
+  resources:
+    {{- toYaml .Values.mariadb.resources | nindent 4 }}
+{{- end }}

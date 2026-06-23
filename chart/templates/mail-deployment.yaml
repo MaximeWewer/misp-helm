@@ -1,0 +1,69 @@
+{{- if .Values.mail.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "misp.mail.fullname" . }}
+  labels:
+    app.kubernetes.io/component: mail
+    {{- include "misp.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: mail
+      {{- include "misp.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: mail
+        {{- include "misp.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "misp.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automountServiceAccountToken }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: mail
+          image: {{ include "misp.image" (dict "img" .Values.mail.image "root" .) | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          env:
+            - name: TZ
+              value: {{ .Values.config.timezone | quote }}
+            {{- with .Values.mail.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          ports:
+            - name: smtp
+              containerPort: 25
+              protocol: TCP
+          resources:
+            {{- toYaml .Values.mail.resources | nindent 12 }}
+      {{- with .Values.mail.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "misp.mail.fullname" . }}
+  labels:
+    app.kubernetes.io/component: mail
+    {{- include "misp.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: smtp
+      port: 25
+      targetPort: smtp
+      protocol: TCP
+  selector:
+    app.kubernetes.io/component: mail
+    {{- include "misp.selectorLabels" . | nindent 4 }}
+{{- end }}

@@ -1,0 +1,94 @@
+{{- if .Values.guard.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "misp.guard.fullname" . }}
+  labels:
+    app.kubernetes.io/component: guard
+    {{- include "misp.labels" . | nindent 4 }}
+data:
+  config.json: |
+    {{- .Values.guard.config | nindent 4 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "misp.guard.fullname" . }}
+  labels:
+    app.kubernetes.io/component: guard
+    {{- include "misp.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: guard
+      {{- include "misp.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ .Values.guard.config | sha256sum }}
+      labels:
+        app.kubernetes.io/component: guard
+        {{- include "misp.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "misp.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automountServiceAccountToken }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: misp-guard
+          image: {{ include "misp.image" (dict "img" .Values.guard.image "root" .) | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          env:
+            - name: GUARD_PORT
+              value: {{ .Values.guard.port | quote }}
+            - name: TZ
+              value: {{ .Values.config.timezone | quote }}
+            {{- with .Values.guard.args }}
+            - name: GUARD_ARGS
+              value: {{ . | quote }}
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.guard.port }}
+              protocol: TCP
+          resources:
+            {{- toYaml .Values.guard.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /config.json
+              subPath: config.json
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "misp.guard.fullname" . }}
+      {{- with .Values.guard.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "misp.guard.fullname" . }}
+  labels:
+    app.kubernetes.io/component: guard
+    {{- include "misp.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: {{ .Values.guard.port }}
+      targetPort: http
+      protocol: TCP
+  selector:
+    app.kubernetes.io/component: guard
+    {{- include "misp.selectorLabels" . | nindent 4 }}
+{{- end }}

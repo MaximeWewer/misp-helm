@@ -1,0 +1,118 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "misp.core.fullname" . }}
+  labels:
+    app.kubernetes.io/component: core
+    {{- include "misp.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.core.replicas }}
+  # Single writer to the RWO data volume; recreate to avoid two cores on one PVC.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: core
+      {{- include "misp.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: core
+        {{- include "misp.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "misp.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automountServiceAccountToken }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      initContainers:
+        - name: wait-for-deps
+          image: {{ .Values.config.initImage | quote }}
+          command: ["sh", "-c"]
+          args:
+            - |
+              {{- if .Values.mariadb.enabled }}
+              until nc -z -w3 {{ include "misp.mariadb.fullname" . }} 3306; do echo "waiting for MariaDB"; sleep 5; done
+              {{- end }}
+              until nc -z -w3 {{ include "misp.redis.host" . }} {{ .Values.externalRedis.port | default 6379 }}; do echo "waiting for Redis"; sleep 5; done
+              echo "dependencies reachable."
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+      containers:
+        - name: misp-core
+          image: {{ include "misp.image" (dict "img" .Values.core.image "root" .) | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          env:
+            {{- include "misp.coreEnv" . | nindent 12 }}
+          {{- include "misp.coreEnvFrom" . | nindent 10 }}
+          ports:
+            - name: http
+              containerPort: 80
+              protocol: TCP
+            - name: https
+              containerPort: 443
+              protocol: TCP
+          startupProbe:
+            httpGet:
+              path: /users/heartbeat
+              port: https
+              scheme: HTTPS
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            failureThreshold: 40
+          readinessProbe:
+            httpGet:
+              path: /users/heartbeat
+              port: https
+              scheme: HTTPS
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /users/heartbeat
+              port: https
+              scheme: HTTPS
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 6
+          resources:
+            {{- toYaml .Values.core.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/www/MISP/app/files
+              subPath: files
+            - name: data
+              mountPath: /var/www/MISP/app/Config
+              subPath: config
+            - name: data
+              mountPath: /var/www/MISP/.gnupg
+              subPath: gnupg
+            - name: data
+              mountPath: /var/www/MISP/app/tmp/logs
+              subPath: logs
+      volumes:
+        - name: data
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.persistence.existingClaim | default (printf "%s-data" (include "misp.fullname" .)) }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+      {{- with .Values.core.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.core.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.core.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

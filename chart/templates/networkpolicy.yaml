@@ -1,0 +1,55 @@
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "misp.fullname" . }}
+  labels:
+    {{- include "misp.labels" . | nindent 4 }}
+spec:
+  # Applies to MISP app pods (mariadb operator / redis subchart manage their own).
+  podSelector:
+    matchLabels:
+      {{- include "misp.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Core web UI/API from declared sources (e.g. ingress controller).
+    {{- with .Values.networkPolicy.coreAllowedFrom }}
+    - from:
+        {{- toYaml . | nindent 8 }}
+      ports:
+        - protocol: TCP
+          port: 80
+        - protocol: TCP
+          port: 443
+    {{- end }}
+    # Intra-app: core -> modules (6666){{ if .Values.guard.enabled }}; sync -> guard ({{ .Values.guard.port }}){{ end }}.
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "misp.selectorLabels" . | nindent 14 }}
+      ports:
+        {{- if .Values.modules.enabled }}
+        - protocol: TCP
+          port: {{ .Values.modules.port }}
+        {{- end }}
+        - protocol: TCP
+          port: 80
+        - protocol: TCP
+          port: 25
+  egress:
+    # DNS
+    - to: []
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # In-namespace deps (mariadb 3306, redis 6379, modules, mail).
+    - to:
+        - podSelector: {}
+    {{- with .Values.networkPolicy.extraEgress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}

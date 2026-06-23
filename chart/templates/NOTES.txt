@@ -1,0 +1,37 @@
+MISP deployed: {{ include "misp.fullname" . }}
+
+Components: core{{ if .Values.modules.enabled }}, modules{{ end }}{{ if .Values.mail.enabled }}, mail{{ end }}{{ if .Values.guard.enabled }}, guard{{ end }}
+Dependencies:
+{{- if .Values.mariadb.enabled }}
+  - MariaDB (mariadb-operator): MariaDB/{{ include "misp.mariadb.fullname" . }}
+    WARNING: the mariadb-operator + its CRDs must be installed BEFORE this chart.
+{{- end }}
+{{- if .Values.redis.enabled }}
+  - Redis (CloudPirates): {{ .Release.Name }}-redis (auth enabled)
+{{- end }}
+
+{{- if not .Values.config.baseUrl }}
+
+WARNING: config.baseUrl is NOT set — required (public MISP URL).
+{{- end }}
+
+GUI access:
+{{- if .Values.ingress.enabled }}
+  https://{{ .Values.ingress.host }}
+{{- else }}
+  kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "misp.core.fullname" . }} 8443:443
+  then https://localhost:8443 (self-signed cert)
+{{- end }}
+
+{{- if not .Values.config.existingSecret }}
+
+Initial admin credentials:
+  user: {{ .Values.config.adminEmail }}
+  pass: kubectl get secret -n {{ .Release.Namespace }} {{ include "misp.secretName" . }} -o jsonpath='{.data.admin-password}' | base64 -d
+{{- end }}
+
+Reminders:
+  - core = web + workers + cron (supervisor) in a single pod (RWO, strategy Recreate).
+  - MISP fetches external feeds: allow outbound egress via networkPolicy.extraEgress.
+  - misp-guard needs a real filtering config.json (guard.config) to be useful.
+  - Slow first boot (DB migrations + GPG generation): tolerant startupProbe.

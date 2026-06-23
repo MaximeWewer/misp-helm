@@ -1,0 +1,76 @@
+{{- if .Values.modules.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "misp.modules.fullname" . }}
+  labels:
+    app.kubernetes.io/component: modules
+    {{- include "misp.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.modules.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: modules
+      {{- include "misp.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: modules
+        {{- include "misp.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "misp.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automountServiceAccountToken }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: misp-modules
+          image: {{ include "misp.image" (dict "img" .Values.modules.image "root" .) | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          env:
+            - name: TZ
+              value: {{ .Values.config.timezone | quote }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.modules.port }}
+              protocol: TCP
+          readinessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          livenessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 30
+          resources:
+            {{- toYaml .Values.modules.resources | nindent 12 }}
+      {{- with .Values.modules.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "misp.modules.fullname" . }}
+  labels:
+    app.kubernetes.io/component: modules
+    {{- include "misp.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: {{ .Values.modules.port }}
+      targetPort: http
+      protocol: TCP
+  selector:
+    app.kubernetes.io/component: modules
+    {{- include "misp.selectorLabels" . | nindent 4 }}
+{{- end }}

@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "misp.core.fullname" . }}
+  labels:
+    app.kubernetes.io/component: core
+    {{- include "misp.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.core.service.type }}
+  ports:
+    - name: http
+      port: {{ .Values.core.service.httpPort }}
+      targetPort: http
+      protocol: TCP
+    - name: https
+      port: {{ .Values.core.service.httpsPort }}
+      targetPort: https
+      protocol: TCP
+  selector:
+    app.kubernetes.io/component: core
+    {{- include "misp.selectorLabels" . | nindent 4 }}

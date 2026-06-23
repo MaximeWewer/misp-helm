@@ -1,0 +1,210 @@
+# Default values for misp.
+# Quality baseline: MaximeWewer/intelowl-helm. Operator-first deps:
+# MariaDB via mariadb-operator (MariaDB CRD), Redis via CloudPirates chart.
+
+nameOverride: ""
+fullnameOverride: ""
+
+image:
+  registry: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+## misp-core: web (nginx + php-fpm) + workers + cron (supervisor), all in one image.
+core:
+  image:
+    repository: ghcr.io/misp/misp-docker/misp-core
+    tag: "v2.5.40"
+    digest: ""
+  replicas: 1
+  service:
+    type: ClusterIP
+    httpPort: 80
+    httpsPort: 443
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: "2"
+      memory: 4Gi
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+## misp-modules: enrichment/import/export modules (port 6666).
+modules:
+  enabled: true
+  # Service name. The misp-core image defaults the enrichment URL to
+  # http://misp-modules:6666, so keep this as "misp-modules" unless you also
+  # override the MISP Plugin.*_services_url settings.
+  serviceName: "misp-modules"
+  image:
+    repository: ghcr.io/misp/misp-docker/misp-modules
+    tag: "v3.0.8"
+    digest: ""
+  replicas: 1
+  port: 6666
+  resources: {}
+  nodeSelector: {}
+
+## mail: SMTP relay (egos-tech/smtp). Disable and use config.extraEnv SMTP_FQDN to
+## point at an external relay in production.
+mail:
+  enabled: true
+  image:
+    repository: ghcr.io/egos-tech/smtp
+    tag: "1.1.3"
+    digest: ""
+  # Relay config (SES_*/SMARTHOST_*). Sensitive values: prefer a Secret via env valueFrom.
+  extraEnv: []
+  resources: {}
+  nodeSelector: {}
+
+## misp-guard: filtering proxy for MISP sync (port 8888). Optional.
+guard:
+  enabled: true
+  image:
+    repository: ghcr.io/misp/misp-docker/misp-guard
+    tag: "v1.2"
+    digest: ""
+  port: 8888
+  args: ""
+  # misp-guard REQUIRES a filtering ruleset at /config.json. This is a minimal
+  # VALID-JSON skeleton — replace with your real sync-filtering rules (see
+  # https://github.com/MISP/misp-docker/blob/master/guard/config.json) or guard
+  # will not filter meaningfully. guard is isolated; a bad config won't affect core.
+  config: |
+    {
+      "allowlist": { "domains": [], "urls": [] },
+      "compartments_rules": { "can_reach": {} },
+      "instances": {}
+    }
+  resources: {}
+  nodeSelector: {}
+
+## MISP application config.
+config:
+  # Existing Secret with keys: mysql-root-password, mysql-password, admin-password,
+  # admin-key, gpg-passphrase, encryption-key, salt. If empty, the chart generates them.
+  existingSecret: ""
+  # Public URL MISP is served on (REQUIRED). e.g. https://misp.example.com
+  baseUrl: ""
+  timezone: "UTC"
+  # Apply DB schema updates on boot. REQUIRED on first install: the image's base
+  # schema lags the app, so tables like `bookmarks` are created by these updates.
+  # Without it, authenticated endpoints 500 with MissingTableException until you
+  # run `cake Admin runUpdates` manually.
+  enableBackgroundUpdates: true
+  # Initial site admin (created on first boot).
+  adminEmail: "admin@admin.test"
+  adminOrg: "ORGNAME"
+  # Init container (nc) waiting for DB + Redis before misp-core starts.
+  initImage: "busybox:1.36"
+  # Extra env appended to misp-core (OIDC_*, LDAP*, AAD_*, PROXY_*, S3_*, SYNCSERVERS_*,
+  # PHP_*, NGINX_*). See https://github.com/MISP/misp-docker template.env
+  extraEnv: []
+  # envFrom (Secrets/ConfigMaps) for the above when sourced from a Secret.
+  extraEnvFrom: []
+
+## Persistent data for misp-core (RWO; single core replica). Mounted via subPaths:
+## Config, files (attachments), .gnupg, tmp/logs. Seeded from image defaults on first
+## start by an init container (mounting a PVC hides the image's shipped defaults).
+persistence:
+  enabled: true
+  existingClaim: ""
+  storageClass: ""
+  size: 10Gi
+  accessModes:
+    - ReadWriteOnce
+
+## MariaDB via mariadb-operator (the operator + CRDs must be installed first).
+mariadb:
+  enabled: true
+  username: misp
+  database: misp
+  image: "mariadb:10.11"
+  storage:
+    size: 10Gi
+    storageClassName: ""
+  resources:
+    requests:
+      cpu: 300m
+      memory: 512Mi
+    limits:
+      memory: 2Gi
+  # InnoDB tuning (mirrors the upstream misp-docker compose).
+  myCnf: |
+    [mariadb]
+    bind-address=*
+    default_storage_engine=InnoDB
+    innodb_buffer_pool_size=2048M
+    innodb_change_buffering=none
+    innodb_io_capacity=1000
+    innodb_io_capacity_max=2000
+    innodb_log_file_size=600M
+    innodb_read_io_threads=16
+    innodb_write_io_threads=4
+    max_allowed_packet=256M
+
+## Redis (CloudPirates subchart). MISP supports Redis auth, so it is ENABLED;
+## the subchart generates a password in the <release>-redis Secret (key redis-password),
+## which misp-core reads as REDIS_PASSWORD.
+redis:
+  enabled: true
+  auth:
+    enabled: true
+  persistence:
+    enabled: true
+    size: 2Gi
+
+## Point MISP at an external Redis instead of the subchart (sets redis.enabled=false).
+externalRedis:
+  host: ""
+  port: 6379
+  existingSecret: ""
+  existingSecretPasswordKey: "redis-password"
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+  automountServiceAccountToken: false
+
+podSecurityContext:
+  seccompProfile:
+    type: RuntimeDefault
+  # misp-core runs nginx + php-fpm as root (supervisor); enable after verifying uids.
+  runAsNonRoot: false
+
+## Container hardening. misp-core needs some caps for nginx/php-fpm/cron; keep a
+## conservative drop set rather than ALL to avoid breaking the supervisor stack.
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  privileged: false
+  capabilities:
+    drop:
+      - ALL
+    add:
+      - CHOWN
+      - SETUID
+      - SETGID
+      - DAC_OVERRIDE
+      - AUDIT_WRITE
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  host: misp.example.com
+  tls: []
+
+networkPolicy:
+  enabled: true
+  coreAllowedFrom: []
+  extraEgress: []
+
+podDisruptionBudget:
+  enabled: false
+  minAvailable: ""
+  maxUnavailable: ""
