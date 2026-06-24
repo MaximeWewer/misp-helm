@@ -1,5 +1,7 @@
 # Misp Helm
 
+Helm chart for [MISP](https://github.com/MISP/MISP).
+
 ## Architecture
 
 | Component | Type | Role |
@@ -61,7 +63,7 @@ MISP reads ~150 env variables (see [template.env](https://github.com/MISP/misp-d
 | `config.baseUrl` | `""` | **REQUIRED** — public MISP URL |
 | `config.existingSecret` | `""` | Creds secret (otherwise generated) |
 | `config.adminEmail` / `config.adminOrg` | `admin@admin.test` / `ORGNAME` | Initial admin |
-| `core.image.tag` | `v2.5.40` | misp-core version |
+| `core.image.tag` | `v2.5.42` | misp-core version |
 | `modules.enabled` / `modules.serviceName` | `true` / `misp-modules` | Modules (service name the image expects) |
 | `mail.enabled` | `true` | SMTP relay (otherwise external SMTP via extraEnv) |
 | `guard.enabled` / `guard.config` | `true` / skeleton | Sync filtering proxy (config.json to provide) |
@@ -84,7 +86,7 @@ MISP reads ~150 env variables (see [template.env](https://github.com/MISP/misp-d
 
 | Repository | Name | Version |
 |------------|------|---------|
-| oci://registry-1.docker.io/cloudpirates | redis | 0.30.4 |
+| oci://registry-1.docker.io/cloudpirates | redis | 0.30.* |
 
 ## Values
 
@@ -110,7 +112,7 @@ MISP reads ~150 env variables (see [template.env](https://github.com/MISP/misp-d
 | core.affinity | object | `{}` |  |
 | core.image.digest | string | `""` |  |
 | core.image.repository | string | `"ghcr.io/misp/misp-docker/misp-core"` |  |
-| core.image.tag | string | `"v2.5.40"` |  |
+| core.image.tag | string | `"v2.5.42"` |  |
 | core.nodeSelector | object | `{}` |  |
 | core.replicas | int | `1` |  |
 | core.resources.limits.cpu | string | `"2"` |  |
