@@ -1,0 +1,135 @@
+name: Update Versions
+
+on:
+  schedule:
+    # Every Monday at 08:00 UTC
+    - cron: "0 8 * * 1"
+  workflow_dispatch:
+
+jobs:
+  update-versions:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install tools
+        run: |
+          sudo apt-get update && sudo apt-get install -y jq
+          curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-4 | bash
+          curl -sSLo helm-docs.tar.gz https://github.com/norwoodj/helm-docs/releases/download/v1.14.2/helm-docs_1.14.2_Linux_x86_64.tar.gz
+          tar -xf helm-docs.tar.gz helm-docs
+          sudo mv helm-docs /usr/local/bin/helm-docs
+
+      - name: Get latest MISP image tags
+        id: misp
+        run: |
+          # misp-docker template.env pins the component image tags MISP releases together.
+          ENV=$(curl -s https://raw.githubusercontent.com/MISP/misp-docker/master/template.env)
+          CORE=$(echo "$ENV" | grep '^CORE_TAG=' | cut -d= -f2 | tr -d '"')
+          MODULES=$(echo "$ENV" | grep '^MODULES_TAG=' | cut -d= -f2 | tr -d '"')
+          GUARD=$(echo "$ENV" | grep '^GUARD_TAG=' | cut -d= -f2 | tr -d '"')
+          echo "core=${CORE}" >> $GITHUB_OUTPUT
+          echo "modules=${MODULES}" >> $GITHUB_OUTPUT
+          echo "guard=${GUARD}" >> $GITHUB_OUTPUT
+          echo "MISP core: ${CORE} | modules: ${MODULES} | guard: ${GUARD}"
+
+      - name: Get latest dependency chart versions
+        id: deps
+        run: |
+          # CloudPirates Redis (OCI) — track the major.minor, let patch releases float.
+          REDIS_VERSION=$(helm show chart oci://registry-1.docker.io/cloudpirates/redis 2>/dev/null | grep '^version:' | awk '{print $2}' || true)
+          if [ -n "$REDIS_VERSION" ]; then
+            REDIS_MAJOR_MINOR=$(echo "$REDIS_VERSION" | sed 's/\.[0-9]*$/.*/')
+            echo "redis=${REDIS_MAJOR_MINOR}" >> $GITHUB_OUTPUT
+            echo "Redis latest: ${REDIS_VERSION} -> pattern ${REDIS_MAJOR_MINOR}"
+          else
+            echo "redis=" >> $GITHUB_OUTPUT
+            echo "Could not determine Redis version, skipping"
+          fi
+
+      - name: Update Chart.yaml
+        run: |
+          CORE="${{ steps.misp.outputs.core }}"
+          REDIS="${{ steps.deps.outputs.redis }}"
+
+          # appVersion tracks the misp-core release
+          sed -i "s/^appVersion: .*/appVersion: \"${CORE}\"/" chart/Chart.yaml
+
+          # Dependency chart version
+          if [ -n "$REDIS" ]; then
+            sed -i "/name: redis/{n;s/version: .*/version: \"${REDIS}\"/}" chart/Chart.yaml
+          fi
+
+      - name: Update values.yaml
+        run: |
+          CORE="${{ steps.misp.outputs.core }}"
+          MODULES="${{ steps.misp.outputs.modules }}"
+          GUARD="${{ steps.misp.outputs.guard }}"
+
+          # Update each component image tag (matched via its repository line)
+          sed -i "\#repository: ghcr.io/misp/misp-docker/misp-core#{n;s/tag: .*/tag: \"${CORE}\"/}" chart/values.yaml
+          sed -i "\#repository: ghcr.io/misp/misp-docker/misp-modules#{n;s/tag: .*/tag: \"${MODULES}\"/}" chart/values.yaml
+          sed -i "\#repository: ghcr.io/misp/misp-docker/misp-guard#{n;s/tag: .*/tag: \"${GUARD}\"/}" chart/values.yaml
+
+      - name: Check for changes
+        id: changes
+        run: |
+          if git diff --quiet; then
+            echo "changed=false" >> $GITHUB_OUTPUT
+            echo "No changes detected"
+          else
+            echo "changed=true" >> $GITHUB_OUTPUT
+            echo "Changes detected:"
+            git diff --stat
+          fi
+
+      - name: Align chart version with MISP
+        if: steps.changes.outputs.changed == 'true'
+        id: bump
+        run: |
+          # Strip leading 'v' from the misp-core tag to get a semver base
+          BASE="${{ steps.misp.outputs.core }}"
+          BASE="${BASE#v}"
+          DATE=$(date -u +'%d-%m-%Y')
+          NEW_VERSION="${BASE}-${DATE}"
+          sed -i "s/^version: .*/version: ${NEW_VERSION}/" chart/Chart.yaml
+          echo "version=${NEW_VERSION}" >> $GITHUB_OUTPUT
+          echo "Chart version set to: ${NEW_VERSION}"
+
+      - name: Regenerate chart README
+        if: steps.changes.outputs.changed == 'true'
+        run: |
+          CORE="${{ steps.misp.outputs.core }}"
+          # Keep the hand-written "Main values" core.image.tag reference in sync,
+          # then regenerate chart/README.md (Requirements + Values tables) from the template.
+          sed -i "/core.image.tag/ s|\`v[0-9.]*\`|\`${CORE}\`|" chart/README.md.gotmpl
+          helm-docs --chart-search-root chart
+
+      - name: Create Pull Request
+        if: steps.changes.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "chore: update versions to MISP ${{ steps.misp.outputs.core }}"
+          title: "chore: update versions to MISP ${{ steps.misp.outputs.core }}"
+          body: |
+            ## Automated version update
+
+            | Component | Version |
+            |-----------|---------|
+            | misp-core (appVersion) | `${{ steps.misp.outputs.core }}` |
+            | misp-modules | `${{ steps.misp.outputs.modules }}` |
+            | misp-guard | `${{ steps.misp.outputs.guard }}` |
+            | Chart version | `${{ steps.bump.outputs.version }}` |
+
+            ### Dependency chart updates
+            | Dependency | Version pattern |
+            |-----------|----------------|
+            | redis | `${{ steps.deps.outputs.redis }}` |
+          branch: chore/update-versions
+          delete-branch: true
