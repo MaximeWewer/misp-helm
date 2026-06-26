@@ -33,8 +33,15 @@ jobs:
       - name: Get chart version
         id: chart
         run: |
+          # Chart.yaml version is BASE-DD-MM-YYYY. Re-stamp the date suffix with
+          # today's date so the published version matches the release day, not the
+          # day the update-versions PR was generated.
           VERSION=$(grep '^version:' chart/Chart.yaml | awk '{print $2}')
+          BASE=${VERSION%-*-*-*}
+          DATE=$(date -u +'%d-%m-%Y')
+          VERSION="${BASE}-${DATE}"
           echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Releasing chart version: $VERSION"
 
       - name: Login to GitHub Container Registry
         run: |
@@ -46,7 +53,7 @@ jobs:
 
       - name: Package Helm chart
         run: |
-          helm package chart/
+          helm package chart/ --version ${{ steps.chart.outputs.version }}
 
       - name: Push Helm chart to GHCR
         run: |
