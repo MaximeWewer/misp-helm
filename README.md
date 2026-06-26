@@ -73,6 +73,8 @@ Secrets are generated automatically when `config.existingSecret` is not provided
 kubectl get secret -n cti misp-secret -o jsonpath='{.data.admin-password}' | base64 -d
 ```
 
+Per-key resolution when `config.existingSecret` is empty: inline `config.secrets.*` > existing in-cluster Secret (`lookup`) > generated random. With **ArgoCD and no secret manager**, set the values inline under `config.secrets` — Argo's `lookup` is unreliable during diff/sync, so an unset key re-rolls to a new random each sync and breaks the DB and admin login.
+
 ## Configuration
 
 See the full list of configurable values in [`chart/README.md`](chart/README.md).

@@ -41,6 +41,10 @@ Secrets are generated automatically (`mysql-root-password`, `mysql-password`, `a
 kubectl get secret -n cti misp-secret -o jsonpath='{.data.admin-password}' | base64 -d
 ```
 
+Per-key resolution when `config.existingSecret` is empty: inline `config.secrets.*` > existing in-cluster Secret (`lookup`) > generated random.
+
+**ArgoCD without a secret manager:** set the values inline under `config.secrets` (`mysqlRootPassword`, `mysqlPassword`, `adminPassword`, `adminKey`, `gpgPassphrase`, `encryptionKey`, `salt`). Argo's `lookup` is unreliable during diff/sync, so an unset key re-rolls to a new random each sync and breaks the DB and admin login; inline values are deterministic and stable.
+
 ## Security
 
 - Hardened `containerSecurityContext`: `allowPrivilegeEscalation:false`, `drop:[ALL]` + the minimal caps the nginx/php-fpm/cron stack requires (`CHOWN/SETUID/SETGID/DAC_OVERRIDE/AUDIT_WRITE`), `seccompProfile:RuntimeDefault`.
@@ -62,6 +66,7 @@ MISP reads ~150 env variables (see [template.env](https://github.com/MISP/misp-d
 |-----|---------|-------------|
 | `config.baseUrl` | `""` | **REQUIRED** — public MISP URL |
 | `config.existingSecret` | `""` | Creds secret (otherwise generated) |
+| `config.secrets.*` | `""` | Inline creds (no secret manager / ArgoCD-safe); per key: inline > lookup > random |
 | `config.adminEmail` / `config.adminOrg` | `admin@admin.test` / `ORGNAME` | Initial admin |
 | `core.image.tag` | `v2.5.42` | misp-core version |
 | `modules.enabled` / `modules.serviceName` | `true` / `misp-modules` | Modules (service name the image expects) |

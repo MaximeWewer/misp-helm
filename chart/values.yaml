@@ -88,6 +88,20 @@ config:
   # Existing Secret with keys: mysql-root-password, mysql-password, admin-password,
   # admin-key, gpg-passphrase, encryption-key, salt. If empty, the chart generates them.
   existingSecret: ""
+  # Inline secrets. Manage values directly here when you have no secret manager.
+  # Per-key resolution: inline value below > existing in-cluster Secret (lookup) >
+  # generated random. RECOMMENDED with ArgoCD: its `lookup` is unreliable during
+  # diff/sync, so an unset key re-rolls to a NEW random each sync and breaks the DB
+  # and admin login. Setting these inline makes them deterministic and stable.
+  # Leave a key empty to keep the lookup+random behaviour for that key.
+  secrets:
+    mysqlRootPassword: ""
+    mysqlPassword: ""
+    adminPassword: ""
+    adminKey: ""
+    gpgPassphrase: ""
+    encryptionKey: ""
+    salt: ""
   # Public URL MISP is served on (REQUIRED). e.g. https://misp.example.com
   baseUrl: ""
   timezone: "UTC"

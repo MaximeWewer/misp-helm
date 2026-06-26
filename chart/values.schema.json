@@ -21,6 +21,18 @@
       "type": "object",
       "properties": {
         "existingSecret": { "type": "string" },
+        "secrets": {
+          "type": "object",
+          "properties": {
+            "mysqlRootPassword": { "type": "string" },
+            "mysqlPassword": { "type": "string" },
+            "adminPassword": { "type": "string" },
+            "adminKey": { "type": "string" },
+            "gpgPassphrase": { "type": "string" },
+            "encryptionKey": { "type": "string" },
+            "salt": { "type": "string" }
+          }
+        },
         "baseUrl": { "type": "string" },
         "timezone": { "type": "string" },
         "adminEmail": { "type": "string" },
