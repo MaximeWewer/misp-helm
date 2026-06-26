@@ -7,7 +7,7 @@ fullnameOverride: ""
 
 image:
   registry: ""
-  pullPolicy: IfNotPresent
+  pullPolicy: Always
 imagePullSecrets: []
 
 ## misp-core: web (nginx + php-fpm) + workers + cron (supervisor), all in one image.
@@ -205,6 +205,13 @@ containerSecurityContext:
       - SETGID
       - DAC_OVERRIDE
       - AUDIT_WRITE
+      # nginx binds privileged ports 80/443; without this it fails with
+      # "bind() to 0.0.0.0:443 failed (13: Permission denied)" since drop:[ALL]
+      # removes the cap even for root.
+      - NET_BIND_SERVICE
+      # entrypoint chmods seeded files (tmp/files) owned by www-data while running
+      # as root; without FOWNER chmod-on-unowned fails with "Operation not permitted".
+      - FOWNER
 
 ingress:
   enabled: false
