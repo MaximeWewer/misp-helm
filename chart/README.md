@@ -41,6 +41,10 @@ Secrets are generated automatically (`mysql-root-password`, `mysql-password`, `a
 kubectl get secret -n cti misp-secret -o jsonpath='{.data.admin-password}' | base64 -d
 ```
 
+Per-key resolution when `config.existingSecret` is empty: inline `config.secrets.*` > existing in-cluster Secret (`lookup`) > generated random.
+
+**ArgoCD without a secret manager:** set the values inline under `config.secrets` (`mysqlRootPassword`, `mysqlPassword`, `adminPassword`, `adminKey`, `gpgPassphrase`, `encryptionKey`, `salt`). Argo's `lookup` is unreliable during diff/sync, so an unset key re-rolls to a new random each sync and breaks the DB and admin login; inline values are deterministic and stable.
+
 ## Security
 
 - Hardened `containerSecurityContext`: `allowPrivilegeEscalation:false`, `drop:[ALL]` + the minimal caps the nginx/php-fpm/cron stack requires (`CHOWN/SETUID/SETGID/DAC_OVERRIDE/AUDIT_WRITE`), `seccompProfile:RuntimeDefault`.
@@ -62,8 +66,9 @@ MISP reads ~150 env variables (see [template.env](https://github.com/MISP/misp-d
 |-----|---------|-------------|
 | `config.baseUrl` | `""` | **REQUIRED** — public MISP URL |
 | `config.existingSecret` | `""` | Creds secret (otherwise generated) |
+| `config.secrets.*` | `""` | Inline creds (no secret manager / ArgoCD-safe); per key: inline > lookup > random |
 | `config.adminEmail` / `config.adminOrg` | `admin@admin.test` / `ORGNAME` | Initial admin |
-| `core.image.tag` | `v2.5.42` | misp-core version |
+| `core.image.tag` | `v2.5.43` | misp-core version |
 | `modules.enabled` / `modules.serviceName` | `true` / `misp-modules` | Modules (service name the image expects) |
 | `mail.enabled` | `true` | SMTP relay (otherwise external SMTP via extraEnv) |
 | `guard.enabled` / `guard.config` | `true` / skeleton | Sync filtering proxy (config.json to provide) |
@@ -86,7 +91,7 @@ MISP reads ~150 env variables (see [template.env](https://github.com/MISP/misp-d
 
 | Repository | Name | Version |
 |------------|------|---------|
-| oci://registry-1.docker.io/cloudpirates | redis | 0.30.* |
+| oci://registry-1.docker.io/cloudpirates | redis | 0.32.* |
 
 ## Values
 
@@ -100,6 +105,13 @@ MISP reads ~150 env variables (see [template.env](https://github.com/MISP/misp-d
 | config.extraEnv | list | `[]` |  |
 | config.extraEnvFrom | list | `[]` |  |
 | config.initImage | string | `"busybox:1.36"` |  |
+| config.secrets.adminKey | string | `""` |  |
+| config.secrets.adminPassword | string | `""` |  |
+| config.secrets.encryptionKey | string | `""` |  |
+| config.secrets.gpgPassphrase | string | `""` |  |
+| config.secrets.mysqlPassword | string | `""` |  |
+| config.secrets.mysqlRootPassword | string | `""` |  |
+| config.secrets.salt | string | `""` |  |
 | config.timezone | string | `"UTC"` |  |
 | containerSecurityContext.allowPrivilegeEscalation | bool | `false` |  |
 | containerSecurityContext.capabilities.add[0] | string | `"CHOWN"` |  |
@@ -107,12 +119,14 @@ MISP reads ~150 env variables (see [template.env](https://github.com/MISP/misp-d
 | containerSecurityContext.capabilities.add[2] | string | `"SETGID"` |  |
 | containerSecurityContext.capabilities.add[3] | string | `"DAC_OVERRIDE"` |  |
 | containerSecurityContext.capabilities.add[4] | string | `"AUDIT_WRITE"` |  |
+| containerSecurityContext.capabilities.add[5] | string | `"NET_BIND_SERVICE"` |  |
+| containerSecurityContext.capabilities.add[6] | string | `"FOWNER"` |  |
 | containerSecurityContext.capabilities.drop[0] | string | `"ALL"` |  |
 | containerSecurityContext.privileged | bool | `false` |  |
 | core.affinity | object | `{}` |  |
 | core.image.digest | string | `""` |  |
 | core.image.repository | string | `"ghcr.io/misp/misp-docker/misp-core"` |  |
-| core.image.tag | string | `"v2.5.42"` |  |
+| core.image.tag | string | `"v2.5.43"` |  |
 | core.nodeSelector | object | `{}` |  |
 | core.replicas | int | `1` |  |
 | core.resources.limits.cpu | string | `"2"` |  |
@@ -137,7 +151,7 @@ MISP reads ~150 env variables (see [template.env](https://github.com/MISP/misp-d
 | guard.nodeSelector | object | `{}` |  |
 | guard.port | int | `8888` |  |
 | guard.resources | object | `{}` |  |
-| image.pullPolicy | string | `"IfNotPresent"` |  |
+| image.pullPolicy | string | `"Always"` |  |
 | image.registry | string | `""` |  |
 | imagePullSecrets | list | `[]` |  |
 | ingress.annotations | object | `{}` |  |
