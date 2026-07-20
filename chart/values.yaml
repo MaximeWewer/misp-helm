@@ -14,7 +14,7 @@ imagePullSecrets: []
 core:
   image:
     repository: ghcr.io/misp/misp-docker/misp-core
-    tag: "v2.5.43"
+    tag: "v2.5.44"
     digest: ""
   replicas: 1
   service:
@@ -41,7 +41,7 @@ modules:
   serviceName: "misp-modules"
   image:
     repository: ghcr.io/misp/misp-docker/misp-modules
-    tag: "v3.0.8"
+    tag: "v3.0.9"
     digest: ""
   replicas: 1
   port: 6666
