@@ -30,6 +30,24 @@ Initial admin credentials:
   pass: kubectl get secret -n {{ .Release.Namespace }} {{ include "misp.secretName" . }} -o jsonpath='{.data.admin-password}' | base64 -d
 {{- end }}
 
+{{- if .Values.metrics.enabled }}
+
+Metrics:
+{{- if .Values.metrics.core.enabled }}
+  - misp-core (php-fpm): svc/{{ include "misp.core.fullname" . }}-metrics:{{ .Values.metrics.core.port }}/metrics
+{{- end }}
+{{- if and .Values.mariadb.enabled .Values.metrics.mariadb.enabled }}
+  - mariadb (mysqld-exporter): deployed by mariadb-operator, port {{ .Values.metrics.mariadb.port }}
+{{- end }}
+{{- if and .Values.redis.enabled (not .Values.redis.metrics.enabled) }}
+  - Redis metrics are OFF: the subchart switch is separate, set redis.metrics.enabled=true.
+{{- end }}
+{{- if .Values.metrics.serviceMonitor.enabled }}
+  - ServiceMonitors created; they must match your Prometheus serviceMonitorSelector
+    (kube-prometheus-stack: metrics.serviceMonitor.labels.release=<kps release>).
+{{- end }}
+{{- end }}
+
 Reminders:
   - core = web + workers + cron (supervisor) in a single pod (RWO, strategy Recreate).
   - MISP fetches external feeds: allow outbound egress via networkPolicy.extraEgress.

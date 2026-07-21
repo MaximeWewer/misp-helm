@@ -30,4 +30,30 @@ spec:
   {{- end }}
   resources:
     {{- toYaml .Values.mariadb.resources | nindent 4 }}
+  {{- if and .Values.metrics.enabled .Values.metrics.mariadb.enabled }}
+  # The operator deploys mysqld-exporter, provisions the monitoring user + its Secret,
+  # and reconciles the ServiceMonitor itself (needs the prometheus-operator CRDs).
+  metrics:
+    enabled: true
+    exporter:
+      {{- with .Values.metrics.mariadb.image }}
+      image: {{ . | quote }}
+      {{- end }}
+      port: {{ .Values.metrics.mariadb.port }}
+      {{- with .Values.metrics.mariadb.resources }}
+      resources:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    {{- if .Values.metrics.serviceMonitor.enabled }}
+    serviceMonitor:
+      {{- $release := .Values.metrics.serviceMonitor.prometheusRelease | default (get .Values.metrics.serviceMonitor.labels "release") }}
+      {{- with $release }}
+      prometheusRelease: {{ . | quote }}
+      {{- end }}
+      interval: {{ .Values.metrics.serviceMonitor.interval }}
+      {{- with .Values.metrics.serviceMonitor.scrapeTimeout }}
+      scrapeTimeout: {{ . }}
+      {{- end }}
+    {{- end }}
+  {{- end }}
 {{- end }}

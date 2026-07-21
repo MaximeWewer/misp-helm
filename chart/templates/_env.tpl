@@ -65,6 +65,13 @@ sync, PHP tuning) is left to extraEnv / extraEnvFrom.
     secretKeyRef:
       name: {{ include "misp.secretName" . }}
       key: salt
+{{- if and .Values.metrics.enabled .Values.metrics.core.enabled }}
+# --- Metrics ---
+# Non-empty FASTCGI_STATUS_LISTEN is what makes the entrypoint set pm.status_path=/status
+# and pm.status_listen=/run/php/php-fpm-status.sock (scraped by the exporter sidecar).
+- name: FASTCGI_STATUS_LISTEN
+  value: {{ .Values.metrics.core.statusPort | quote }}
+{{- end }}
 {{- if .Values.mail.enabled }}
 - name: SMTP_FQDN
   value: {{ include "misp.mail.fullname" . | quote }}

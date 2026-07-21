@@ -96,7 +96,44 @@ spec:
             - name: data
               mountPath: /var/www/MISP/app/tmp/logs
               subPath: logs
+            {{- if and .Values.metrics.enabled .Values.metrics.core.enabled }}
+            - name: php-run
+              mountPath: /run/php
+            {{- end }}
+        {{- if and .Values.metrics.enabled .Values.metrics.core.enabled }}
+        # Reads the php-fpm status pool over the socket shared via the php-run emptyDir.
+        # FastCGI directly — no nginx hop (see FASTCGI_STATUS_LISTEN in _env.tpl).
+        - name: metrics
+          image: {{ include "misp.image" (dict "img" .Values.metrics.core.image "root" .) | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.metrics.core.securityContext | nindent 12 }}
+          args:
+            - --phpfpm.scrape-uri
+            - "unix:///run/php/php-fpm-status.sock;/status"
+            - --web.listen-address
+            - ":{{ .Values.metrics.core.port }}"
+          ports:
+            - name: metrics
+              containerPort: {{ .Values.metrics.core.port }}
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          resources:
+            {{- toYaml .Values.metrics.core.resources | nindent 12 }}
+          volumeMounts:
+            - name: php-run
+              mountPath: /run/php
+        {{- end }}
       volumes:
+        {{- if and .Values.metrics.enabled .Values.metrics.core.enabled }}
+        - name: php-run
+          emptyDir: {}
+        {{- end }}
         - name: data
           {{- if .Values.persistence.enabled }}
           persistentVolumeClaim:

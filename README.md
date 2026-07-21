@@ -8,6 +8,7 @@ Helm chart for [MISP](https://github.com/MISP/MISP) on Kubernetes.
 - MariaDB via the [mariadb-operator](https://github.com/mariadb-operator/mariadb-operator) (`MariaDB` CR)
 - Redis via the [CloudPirates](https://github.com/CloudPirates-io/helm-charts) chart (auth enabled)
 - NetworkPolicies, PodDisruptionBudget, hardened securityContext, generate-once secrets
+- Optional Prometheus metrics (`metrics.enabled`): php-fpm exporter sidecar on misp-core, mysqld-exporter via mariadb-operator, redis_exporter via the Redis subchart, with ServiceMonitors
 - `extraEnv` / `extraEnvFrom` for the ~150 MISP env variables (OIDC/LDAP/S3/sync…)
 - Automated weekly version updates tracking upstream MISP releases
 

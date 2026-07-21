@@ -60,6 +60,33 @@ MISP reads ~150 env variables (see [template.env](https://github.com/MISP/misp-d
 - **`config.extraEnv`**: additional structured env (OIDC_*, LDAPAUTH_*, AAD_*, PROXY_*, S3_*, SYNCSERVERS_*, PHP_*, NGINX_*).
 - **`config.extraEnvFrom`**: the same from a Secret/ConfigMap (OIDC/LDAP/S3 creds…).
 
+## Metrics (Prometheus)
+
+Upstream MISP ships **no** Prometheus endpoint: neither misp-core, misp-modules, misp-guard nor the SMTP relay expose `/metrics`. What is actually scrapeable is wired here:
+
+| App | Exporter | Owner | Port |
+|-----|----------|-------|------|
+| `misp-core` | [php-fpm_exporter](https://github.com/hipages/php-fpm_exporter) sidecar (php-fpm pool stats) | this chart | 9253 |
+| `mariadb` | `mysqld-exporter` | mariadb-operator (`MariaDB.spec.metrics`) | 9104 |
+| `redis` | `redis_exporter` | CloudPirates sub-chart | 9121 |
+
+```sh
+helm upgrade --install misp . -n cti \
+  --set config.baseUrl=https://misp.example.com \
+  --set metrics.enabled=true \
+  --set metrics.serviceMonitor.enabled=true \
+  --set 'metrics.serviceMonitor.labels.release=kube-prometheus-stack' \
+  --set redis.metrics.enabled=true \
+  --set redis.metrics.serviceMonitor.enabled=true
+```
+
+- `metrics.enabled` drives only the exporters this chart owns (core sidecar + `MariaDB.spec.metrics`). **Redis is a sub-chart**: Helm cannot template sub-chart values, so `redis.metrics.*` must be set explicitly.
+- misp-core: the image only wires `pm.status_path` when `FASTCGI_STATUS_LISTEN` is non-empty. The chart sets it (`metrics.core.statusPort`, default 8999) so php-fpm opens `unix:/run/php/php-fpm-status.sock`, shared with the sidecar through an `emptyDir`; the sidecar talks **FastCGI directly**, no nginx hop. The exporter runs as `www-data` (uid 33) to match the socket ownership.
+- The exporter is published on a **separate** `<release>-core-metrics` ClusterIP Service, so it is never exposed by `core.service.type: LoadBalancer/NodePort`.
+- The MariaDB ServiceMonitor is created by the **operator**, not by this chart. `metrics.serviceMonitor.prometheusRelease` (falling back to `metrics.serviceMonitor.labels.release`) is passed to the CR so it carries the right label.
+- With `networkPolicy.enabled`, an ingress rule opens the core metrics port — `metrics.allowedFrom` restricts the peers (empty = any namespace, metrics port only).
+- Application-level MISP metrics (event/feed/user counts) only exist out of tree as an API poller writing node_exporter textfiles ([Truesec/misp-metricsexporter](https://github.com/Truesec/misp-metricsexporter)) — not an HTTP endpoint, so it is not wired here.
+
 ## Main values
 
 | Key | Default | Description |
@@ -78,6 +105,9 @@ MISP reads ~150 env variables (see [template.env](https://github.com/MISP/misp-d
 | `persistence.size` | `10Gi` | core PVC (Config/files/gnupg/logs) |
 | `ingress.enabled` | `false` | core Ingress (TLS at the ingress → `DISABLE_SSL_REDIRECT=true` via extraEnv) |
 | `networkPolicy.enabled` | `true` | NetworkPolicy |
+| `metrics.enabled` | `false` | Prometheus exporters owned by the chart (core sidecar + MariaDB CR) |
+| `metrics.serviceMonitor.enabled` | `false` | ServiceMonitor (prometheus-operator CRDs required) |
+| `redis.metrics.enabled` | `false` | redis_exporter (sub-chart switch, not gated on `metrics.enabled`) |
 
 ## Notes
 
@@ -176,6 +206,35 @@ MISP reads ~150 env variables (see [template.env](https://github.com/MISP/misp-d
 | mariadb.storage.size | string | `"10Gi"` |  |
 | mariadb.storage.storageClassName | string | `""` |  |
 | mariadb.username | string | `"misp"` |  |
+| metrics.allowedFrom | list | `[]` |  |
+| metrics.core.enabled | bool | `true` |  |
+| metrics.core.image.digest | string | `""` |  |
+| metrics.core.image.repository | string | `"hipages/php-fpm_exporter"` |  |
+| metrics.core.image.tag | string | `"2.2.0"` |  |
+| metrics.core.port | int | `9253` |  |
+| metrics.core.resources | object | `{}` |  |
+| metrics.core.securityContext.allowPrivilegeEscalation | bool | `false` |  |
+| metrics.core.securityContext.capabilities.drop[0] | string | `"ALL"` |  |
+| metrics.core.securityContext.privileged | bool | `false` |  |
+| metrics.core.securityContext.runAsGroup | int | `33` |  |
+| metrics.core.securityContext.runAsNonRoot | bool | `true` |  |
+| metrics.core.securityContext.runAsUser | int | `33` |  |
+| metrics.core.statusPort | int | `8999` |  |
+| metrics.enabled | bool | `false` |  |
+| metrics.mariadb.enabled | bool | `true` |  |
+| metrics.mariadb.image | string | `""` |  |
+| metrics.mariadb.port | int | `9104` |  |
+| metrics.mariadb.resources | object | `{}` |  |
+| metrics.serviceMonitor.annotations | object | `{}` |  |
+| metrics.serviceMonitor.enabled | bool | `false` |  |
+| metrics.serviceMonitor.honorLabels | bool | `false` |  |
+| metrics.serviceMonitor.interval | string | `"30s"` |  |
+| metrics.serviceMonitor.labels | object | `{}` |  |
+| metrics.serviceMonitor.metricRelabelings | list | `[]` |  |
+| metrics.serviceMonitor.namespace | string | `""` |  |
+| metrics.serviceMonitor.prometheusRelease | string | `""` |  |
+| metrics.serviceMonitor.relabelings | list | `[]` |  |
+| metrics.serviceMonitor.scrapeTimeout | string | `""` |  |
 | modules.enabled | bool | `true` |  |
 | modules.image.digest | string | `""` |  |
 | modules.image.repository | string | `"ghcr.io/misp/misp-docker/misp-modules"` |  |
@@ -201,6 +260,10 @@ MISP reads ~150 env variables (see [template.env](https://github.com/MISP/misp-d
 | podSecurityContext.seccompProfile.type | string | `"RuntimeDefault"` |  |
 | redis.auth.enabled | bool | `true` |  |
 | redis.enabled | bool | `true` |  |
+| redis.metrics.enabled | bool | `false` |  |
+| redis.metrics.serviceMonitor.enabled | bool | `false` |  |
+| redis.metrics.serviceMonitor.interval | string | `"30s"` |  |
+| redis.metrics.serviceMonitor.selector | object | `{}` |  |
 | redis.persistence.enabled | bool | `true` |  |
 | redis.persistence.size | string | `"2Gi"` |  |
 | serviceAccount.annotations | object | `{}` |  |

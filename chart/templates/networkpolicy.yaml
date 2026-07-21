@@ -38,6 +38,19 @@ spec:
           port: 80
         - protocol: TCP
           port: 25
+    {{- if and .Values.metrics.enabled .Values.metrics.core.enabled }}
+    # Prometheus -> misp-core exporter. Empty allowedFrom = any pod/namespace, but on
+    # the metrics port only.
+    - from:
+        {{- with .Values.metrics.allowedFrom }}
+        {{- toYaml . | nindent 8 }}
+        {{- else }}
+        - namespaceSelector: {}
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.metrics.core.port }}
+    {{- end }}
   egress:
     # DNS
     - to: []

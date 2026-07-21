@@ -171,6 +171,90 @@ redis:
   persistence:
     enabled: true
     size: 2Gi
+  # redis_exporter sidecar shipped by the subchart. NOT gated on metrics.enabled —
+  # Helm cannot template subchart values, so enable it here explicitly.
+  metrics:
+    enabled: false
+    serviceMonitor:
+      enabled: false
+      # Must match your Prometheus serviceMonitorSelector (e.g. release: kps).
+      selector: {}
+      interval: 30s
+
+## Prometheus metrics.
+##
+## Upstream MISP exposes NO Prometheus endpoint of its own (misp-core, misp-modules,
+## misp-guard and the SMTP relay ship no /metrics). What IS scrapeable:
+##   - misp-core : php-fpm pool stats, via a php-fpm_exporter sidecar (below)
+##   - mariadb   : mysqld-exporter, run by mariadb-operator (spec.metrics)
+##   - redis     : redis_exporter, run by the CloudPirates subchart (redis.metrics)
+## Application-level MISP metrics (event/feed/user counts) only exist as an out-of-tree
+## API poller writing node_exporter textfiles (Truesec/misp-metricsexporter) — not an
+## HTTP endpoint, so it is not wired here.
+metrics:
+  # Master switch for the exporters this chart owns (misp-core sidecar, MariaDB CR).
+  # Redis is a subchart: its switch cannot be templated, set redis.metrics.* directly.
+  enabled: false
+
+  ## misp-core: php-fpm pool metrics.
+  ## The image only sets `pm.status_path` when FASTCGI_STATUS_LISTEN is non-empty; the
+  ## status pool then listens on unix:/run/php/php-fpm-status.sock, which the sidecar
+  ## reads through an emptyDir shared with misp-core. nginx additionally serves the raw
+  ## status page on statusPort (cluster-internal only, never exposed by the Service).
+  core:
+    enabled: true
+    image:
+      repository: hipages/php-fpm_exporter
+      tag: "2.2.0"
+      digest: ""
+    # Port the sidecar serves /metrics on.
+    port: 9253
+    # nginx port for the plain php-fpm status page (its only role is to switch
+    # pm.status_path on in the image entrypoint).
+    statusPort: 8999
+    resources: {}
+    # www-data (33): the status socket inherits listen.owner/group = www-data, mode 0660.
+    securityContext:
+      allowPrivilegeEscalation: false
+      privileged: false
+      runAsNonRoot: true
+      runAsUser: 33
+      runAsGroup: 33
+      capabilities:
+        drop:
+          - ALL
+
+  ## MariaDB: mysqld-exporter, deployed by mariadb-operator from the MariaDB CR.
+  ## The operator provisions the monitoring user and its Secret by itself, and creates
+  ## the ServiceMonitor (this chart does not).
+  mariadb:
+    enabled: true
+    # Leave empty to let the operator pick its default mysqld-exporter image.
+    image: ""
+    port: 9104
+    resources: {}
+
+  ## NetworkPolicy peers allowed to scrape the misp-core metrics port. Empty = any pod
+  ## in any namespace (metrics port only). Only used when networkPolicy.enabled.
+  allowedFrom: []
+
+  ## ServiceMonitor (prometheus-operator) for the chart-owned exporters.
+  serviceMonitor:
+    enabled: false
+    # Namespace to create the ServiceMonitor in. Empty = release namespace.
+    namespace: ""
+    interval: 30s
+    scrapeTimeout: ""
+    # kube-prometheus-stack only picks up ServiceMonitors carrying its release label,
+    # e.g. `release: kube-prometheus-stack`.
+    labels: {}
+    annotations: {}
+    honorLabels: false
+    relabelings: []
+    metricRelabelings: []
+    # Passed to the MariaDB CR; the operator stamps it as the `release` label on the
+    # ServiceMonitor it creates. Defaults to the value found in serviceMonitor.labels.
+    prometheusRelease: ""
 
 ## Point MISP at an external Redis instead of the subchart (sets redis.enabled=false).
 externalRedis:
