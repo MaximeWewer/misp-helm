@@ -121,7 +121,7 @@ helm upgrade --install misp . -n cti \
 
 | Repository | Name | Version |
 |------------|------|---------|
-| oci://registry-1.docker.io/cloudpirates | redis | 0.32.* |
+| oci://registry-1.docker.io/cloudpirates | redis | 0.33.* |
 
 ## Values
 
