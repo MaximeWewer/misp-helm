@@ -95,7 +95,7 @@ helm upgrade --install misp . -n cti \
 | `config.existingSecret` | `""` | Creds secret (otherwise generated) |
 | `config.secrets.*` | `""` | Inline creds (no secret manager / ArgoCD-safe); per key: inline > lookup > random |
 | `config.adminEmail` / `config.adminOrg` | `admin@admin.test` / `ORGNAME` | Initial admin |
-| `core.image.tag` | `v2.5.44` | misp-core version |
+| `core.image.tag` | `v2.5.46` | misp-core version |
 | `modules.enabled` / `modules.serviceName` | `true` / `misp-modules` | Modules (service name the image expects) |
 | `mail.enabled` | `true` | SMTP relay (otherwise external SMTP via extraEnv) |
 | `guard.enabled` / `guard.config` | `true` / skeleton | Sync filtering proxy (config.json to provide) |
@@ -121,7 +121,7 @@ helm upgrade --install misp . -n cti \
 
 | Repository | Name | Version |
 |------------|------|---------|
-| oci://registry-1.docker.io/cloudpirates | redis | 0.34.* |
+| oci://registry-1.docker.io/cloudpirates | redis | 0.35.* |
 
 ## Values
 
@@ -156,7 +156,7 @@ helm upgrade --install misp . -n cti \
 | core.affinity | object | `{}` |  |
 | core.image.digest | string | `""` |  |
 | core.image.repository | string | `"ghcr.io/misp/misp-docker/misp-core"` |  |
-| core.image.tag | string | `"v2.5.44"` |  |
+| core.image.tag | string | `"v2.5.46"` |  |
 | core.nodeSelector | object | `{}` |  |
 | core.replicas | int | `1` |  |
 | core.resources.limits.cpu | string | `"2"` |  |
@@ -238,7 +238,7 @@ helm upgrade --install misp . -n cti \
 | modules.enabled | bool | `true` |  |
 | modules.image.digest | string | `""` |  |
 | modules.image.repository | string | `"ghcr.io/misp/misp-docker/misp-modules"` |  |
-| modules.image.tag | string | `"v3.0.9"` |  |
+| modules.image.tag | string | `"v3.0.10"` |  |
 | modules.nodeSelector | object | `{}` |  |
 | modules.port | int | `6666` |  |
 | modules.replicas | int | `1` |  |
