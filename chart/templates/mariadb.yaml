@@ -12,10 +12,12 @@ spec:
   rootPasswordSecretKeyRef:
     name: {{ include "misp.secretName" . }}
     key: mysql-root-password
+    generate: false
   username: {{ .Values.mariadb.username | quote }}
   passwordSecretKeyRef:
     name: {{ include "misp.secretName" . }}
     key: mysql-password
+    generate: false
   database: {{ .Values.mariadb.database | quote }}
   image: {{ .Values.mariadb.image | quote }}
   port: 3306
