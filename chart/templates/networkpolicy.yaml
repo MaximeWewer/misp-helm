@@ -14,17 +14,18 @@ spec:
     - Ingress
     - Egress
   ingress:
-    # Core web UI/API from declared sources (e.g. ingress controller).
+    # Web UI/API reaches the misp-nginx frontend (8080/8443) from declared sources
+    # (e.g. the ingress controller).
     {{- with .Values.networkPolicy.coreAllowedFrom }}
     - from:
         {{- toYaml . | nindent 8 }}
       ports:
         - protocol: TCP
-          port: 80
+          port: 8080
         - protocol: TCP
-          port: 443
+          port: 8443
     {{- end }}
-    # Intra-app: core -> modules (6666){{ if .Values.guard.enabled }}; sync -> guard ({{ .Values.guard.port }}){{ end }}.
+    # Intra-app: nginx -> core FastCGI (9002{{ if and .Values.metrics.enabled .Values.metrics.core.enabled }}/9003{{ end }}); core -> modules ({{ .Values.modules.port }}); -> mail (25){{ if .Values.guard.enabled }}; sync -> guard ({{ .Values.guard.port }}){{ end }}.
     - from:
         - podSelector:
             matchLabels:
@@ -35,12 +36,16 @@ spec:
           port: {{ .Values.modules.port }}
         {{- end }}
         - protocol: TCP
-          port: 80
+          port: {{ .Values.core.fastcgiPort }}
+        {{- if and .Values.metrics.enabled .Values.metrics.core.enabled }}
+        - protocol: TCP
+          port: {{ .Values.core.statusPort }}
+        {{- end }}
         - protocol: TCP
           port: 25
-    {{- if and .Values.metrics.enabled .Values.metrics.core.enabled }}
-    # Prometheus -> misp-core exporter. Empty allowedFrom = any pod/namespace, but on
-    # the metrics port only.
+    {{- if .Values.metrics.enabled }}
+    # Prometheus -> chart exporters (core + nginx sidecars). Empty allowedFrom = any
+    # pod/namespace, but on the exporter ports only.
     - from:
         {{- with .Values.metrics.allowedFrom }}
         {{- toYaml . | nindent 8 }}
@@ -48,8 +53,14 @@ spec:
         - namespaceSelector: {}
         {{- end }}
       ports:
+        {{- if .Values.metrics.core.enabled }}
         - protocol: TCP
           port: {{ .Values.metrics.core.port }}
+        {{- end }}
+        {{- if .Values.metrics.nginx.enabled }}
+        - protocol: TCP
+          port: {{ .Values.metrics.nginx.port }}
+        {{- end }}
     {{- end }}
   egress:
     # DNS

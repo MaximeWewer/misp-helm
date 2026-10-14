@@ -65,12 +65,18 @@ sync, PHP tuning) is left to extraEnv / extraEnvFrom.
     secretKeyRef:
       name: {{ include "misp.secretName" . }}
       key: salt
+# --- Web server split ---
+# nginx lives in a separate pod now, so php-fpm must listen on TCP (not the unix
+# socket): PHP_LISTEN_FPM makes the entrypoint bind [::]:9002, which misp-nginx targets.
+- name: PHP_LISTEN_FPM
+  value: "true"
 {{- if and .Values.metrics.enabled .Values.metrics.core.enabled }}
 # --- Metrics ---
-# Non-empty FASTCGI_STATUS_LISTEN is what makes the entrypoint set pm.status_path=/status
-# and pm.status_listen=/run/php/php-fpm-status.sock (scraped by the exporter sidecar).
-- name: FASTCGI_STATUS_LISTEN
-  value: {{ .Values.metrics.core.statusPort | quote }}
+# Non-empty FASTCGI_LISTEN_STATUS makes the entrypoint set pm.status_path=/fpm-status;
+# with PHP_LISTEN_FPM the status pool then listens on TCP [::]:9003 (scraped by the
+# sidecar). The value itself is only an on/off gate for fpm.
+- name: FASTCGI_LISTEN_STATUS
+  value: {{ printf "127.0.0.1:%d" (int .Values.core.statusPort) | quote }}
 {{- end }}
 {{- if .Values.mail.enabled }}
 - name: SMTP_FQDN
@@ -79,6 +85,42 @@ sync, PHP tuning) is left to extraEnv / extraEnvFrom.
   value: "25"
 {{- end }}
 {{- with .Values.config.extraEnv }}
+{{- toYaml . | nindent 0 }}
+{{- end }}
+{{- end }}
+
+{{/*
+Environment for the misp-nginx container: public URL, the FastCGI upstreams (misp-core),
+and optional hardening knobs. extraEnv appends the rest.
+*/}}
+{{- define "misp.nginxEnv" -}}
+- name: BASE_URL
+  value: {{ required "config.baseUrl is required (public MISP URL)" .Values.config.baseUrl | quote }}
+- name: TZ
+  value: {{ .Values.config.timezone | quote }}
+- name: FASTCGI_LISTEN
+  value: {{ printf "%s:%d" (include "misp.core.fullname" .) (int .Values.core.fastcgiPort) | quote }}
+- name: FASTCGI_LISTEN_STATUS
+  value: {{ printf "%s:%d" (include "misp.core.fullname" .) (int .Values.core.statusPort) | quote }}
+- name: NGINX_CLIENT_MAX_BODY_SIZE
+  value: {{ .Values.nginx.clientMaxBodySize | quote }}
+- name: NGINX_X_FRAME_OPTIONS
+  value: {{ .Values.nginx.xFrameOptions | quote }}
+{{- with .Values.nginx.contentSecurityPolicy }}
+- name: NGINX_CONTENT_SECURITY_POLICY
+  value: {{ . | quote }}
+{{- end }}
+{{- with .Values.nginx.hstsMaxAge }}
+- name: NGINX_HSTS_MAX_AGE
+  value: {{ . | quote }}
+{{- end }}
+{{- with .Values.nginx.setRealIpFrom }}
+- name: NGINX_X_FORWARDED_FOR
+  value: "true"
+- name: NGINX_SET_REAL_IP_FROM
+  value: {{ join "," . | quote }}
+{{- end }}
+{{- with .Values.nginx.extraEnv }}
 {{- toYaml . | nindent 0 }}
 {{- end }}
 {{- end }}

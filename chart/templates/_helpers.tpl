@@ -53,6 +53,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 
 {{/* Component names. */}}
 {{- define "misp.core.fullname" -}}{{ printf "%s-core" (include "misp.fullname" .) }}{{- end }}
+{{- define "misp.nginx.fullname" -}}{{ printf "%s-nginx" (include "misp.fullname" .) }}{{- end }}
 {{- define "misp.mariadb.fullname" -}}{{ printf "%s-mariadb" (include "misp.fullname" .) }}{{- end }}
 {{- define "misp.mail.fullname" -}}{{ printf "%s-mail" (include "misp.fullname" .) }}{{- end }}
 {{- define "misp.guard.fullname" -}}{{ printf "%s-guard" (include "misp.fullname" .) }}{{- end }}

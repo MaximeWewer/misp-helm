@@ -7,15 +7,18 @@ metadata:
     {{- include "misp.labels" . | nindent 4 }}
 spec:
   type: {{ .Values.core.service.type }}
+  # Internal FastCGI endpoint consumed by misp-nginx; never a web port.
   ports:
-    - name: http
-      port: {{ .Values.core.service.httpPort }}
-      targetPort: http
+    - name: fastcgi
+      port: {{ .Values.core.fastcgiPort }}
+      targetPort: fastcgi
       protocol: TCP
-    - name: https
-      port: {{ .Values.core.service.httpsPort }}
-      targetPort: https
+    {{- if and .Values.metrics.enabled .Values.metrics.core.enabled }}
+    - name: fpm-status
+      port: {{ .Values.core.statusPort }}
+      targetPort: fpm-status
       protocol: TCP
+    {{- end }}
   selector:
     app.kubernetes.io/component: core
     {{- include "misp.selectorLabels" . | nindent 4 }}

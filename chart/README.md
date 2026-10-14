@@ -6,7 +6,8 @@ Helm chart for [MISP](https://github.com/MISP/MISP).
 
 | Component | Type | Role |
 |-----------|------|------|
-| `core` | Deployment | misp-core: web (nginx + php-fpm) **+ workers + cron** (supervisor) in a single pod. Ports 80/443. PVC `data` (subPaths Config/files/gnupg/logs). `strategy: Recreate` (RWO single-writer) |
+| `core` | Deployment | misp-core: **php-fpm + workers + cron** (supervisor). Since MISP v2.5.x nginx was split out of this image, so core no longer serves HTTP — it listens FastCGI on `core.fastcgiPort` (9002) and the php-fpm status pool on `core.statusPort` (9003, metrics only). PVC `data` (subPaths Config/files/gnupg/logs). `strategy: Recreate` (RWO single-writer) |
+| `nginx` | Deployment | misp-nginx: web frontend (nginx). Terminates HTTP/HTTPS (8080/8443) and forwards to `misp-core:9002` over FastCGI. Ships MISP's static webroot in-image, so **no volume shared with core** → stateless. This is what the Service/Ingress point at |
 | `modules` | Deployment | misp-modules (enrichment/import/export, :6666). Service named `misp-modules` (the default the core image expects) |
 | `mail` | Deployment | SMTP relay (egos-tech/smtp). Optional |
 | `guard` | Deployment | misp-guard, sync filtering proxy (:8888). Optional — requires a real `config.json` |
@@ -67,6 +68,7 @@ Upstream MISP ships **no** Prometheus endpoint: neither misp-core, misp-modules,
 | App | Exporter | Owner | Port |
 |-----|----------|-------|------|
 | `misp-core` | [php-fpm_exporter](https://github.com/hipages/php-fpm_exporter) sidecar (php-fpm pool stats) | this chart | 9253 |
+| `misp-nginx` | [nginx-prometheus-exporter](https://github.com/nginxinc/nginx-prometheus-exporter) sidecar (stub_status) | this chart | 9113 |
 | `mariadb` | `mysqld-exporter` | mariadb-operator (`MariaDB.spec.metrics`) | 9104 |
 | `redis` | `redis_exporter` | CloudPirates sub-chart | 9121 |
 
@@ -80,11 +82,12 @@ helm upgrade --install misp . -n cti \
   --set redis.metrics.serviceMonitor.enabled=true
 ```
 
-- `metrics.enabled` drives only the exporters this chart owns (core sidecar + `MariaDB.spec.metrics`). **Redis is a sub-chart**: Helm cannot template sub-chart values, so `redis.metrics.*` must be set explicitly.
-- misp-core: the image only wires `pm.status_path` when `FASTCGI_STATUS_LISTEN` is non-empty. The chart sets it (`metrics.core.statusPort`, default 8999) so php-fpm opens `unix:/run/php/php-fpm-status.sock`, shared with the sidecar through an `emptyDir`; the sidecar talks **FastCGI directly**, no nginx hop. The exporter runs as `www-data` (uid 33) to match the socket ownership.
-- The exporter is published on a **separate** `<release>-core-metrics` ClusterIP Service, so it is never exposed by `core.service.type: LoadBalancer/NodePort`.
+- `metrics.enabled` drives the exporters this chart owns (core + nginx sidecars + `MariaDB.spec.metrics`). **Redis is a sub-chart**: Helm cannot template sub-chart values, so `redis.metrics.*` must be set explicitly.
+- misp-core: a non-empty `FASTCGI_LISTEN_STATUS` makes the image set `pm.status_path=/fpm-status`; with `PHP_LISTEN_FPM` (always on now) the status pool listens on TCP `core.statusPort` (9003). The sidecar scrapes it directly over FastCGI (`tcp://127.0.0.1:9003/fpm-status`) — no nginx hop.
+- misp-nginx: the image already serves `stub_status` on `127.0.0.1:8081/status`; the sidecar scrapes it and re-exposes `/metrics`.
+- Each exporter is published on a **separate** `<release>-{core,nginx}-metrics` ClusterIP Service, so it is never exposed by the component's own Service type.
 - The MariaDB ServiceMonitor is created by the **operator**, not by this chart. `metrics.serviceMonitor.prometheusRelease` (falling back to `metrics.serviceMonitor.labels.release`) is passed to the CR so it carries the right label.
-- With `networkPolicy.enabled`, an ingress rule opens the core metrics port — `metrics.allowedFrom` restricts the peers (empty = any namespace, metrics port only).
+- With `networkPolicy.enabled`, an ingress rule opens the exporter ports — `metrics.allowedFrom` restricts the peers (empty = any namespace, exporter ports only).
 - Application-level MISP metrics (event/feed/user counts) only exist out of tree as an API poller writing node_exporter textfiles ([Truesec/misp-metricsexporter](https://github.com/Truesec/misp-metricsexporter)) — not an HTTP endpoint, so it is not wired here.
 
 ## Main values
@@ -96,6 +99,8 @@ helm upgrade --install misp . -n cti \
 | `config.secrets.*` | `""` | Inline creds (no secret manager / ArgoCD-safe); per key: inline > lookup > random |
 | `config.adminEmail` / `config.adminOrg` | `admin@admin.test` / `ORGNAME` | Initial admin |
 | `core.image.tag` | `v2.5.48` | misp-core version |
+| `nginx.image.tag` | `""` (→ appVersion) | misp-nginx frontend version (keep in lockstep with core) |
+| `nginx.tls.enabled` / `nginx.tls.autoGenerate` | `true` / `true` | Frontend TLS; auto self-signed cert unless `nginx.tls.existingSecret` is set |
 | `modules.enabled` / `modules.serviceName` | `true` / `misp-modules` | Modules (service name the image expects) |
 | `mail.enabled` | `true` | SMTP relay (otherwise external SMTP via extraEnv) |
 | `guard.enabled` / `guard.config` | `true` / skeleton | Sync filtering proxy (config.json to provide) |
@@ -103,16 +108,17 @@ helm upgrade --install misp . -n cti \
 | `redis.enabled` | `true` | CloudPirates sub-chart (auth on) |
 | `externalRedis.host` | `""` | External Redis (otherwise the sub-chart) |
 | `persistence.size` | `10Gi` | core PVC (Config/files/gnupg/logs) |
-| `ingress.enabled` | `false` | core Ingress (TLS at the ingress → `DISABLE_SSL_REDIRECT=true` via extraEnv) |
+| `ingress.enabled` | `false` | Ingress to the misp-nginx frontend. With `nginx.tls.enabled` the backend is HTTPS → set your controller's backend-protocol annotation to HTTPS |
 | `networkPolicy.enabled` | `true` | NetworkPolicy |
-| `metrics.enabled` | `false` | Prometheus exporters owned by the chart (core sidecar + MariaDB CR) |
+| `metrics.enabled` | `false` | Prometheus exporters owned by the chart (core + nginx sidecars + MariaDB CR) |
 | `metrics.serviceMonitor.enabled` | `false` | ServiceMonitor (prometheus-operator CRDs required) |
 | `redis.metrics.enabled` | `false` | redis_exporter (sub-chart switch, not gated on `metrics.enabled`) |
 
 ## Notes
 
-- `core` = web + workers + cron (supervisor) in 1 pod; RWO + `Recreate`.
-- Slow first boot (DB migrations + GPG) → tolerant `startupProbe` (`/users/heartbeat`).
+- `core` = php-fpm + workers + cron (supervisor), RWO + `Recreate`; `nginx` is a separate stateless frontend forwarding to core over FastCGI (nginx was split out of the core image in MISP v2.5.x).
+- TLS: the misp-nginx image never self-signs and refuses to boot with an `https://` baseUrl and no cert, so the chart auto-generates a self-signed cert (init container) unless `nginx.tls.existingSecret` is set. Behind a TLS-terminating ingress, keep `nginx.tls.enabled` and re-encrypt to the HTTPS backend, or set `nginx.tls.enabled=false` with an `http://` baseUrl.
+- Slow first boot (DB migrations + GPG) → tolerant `startupProbe` on misp-nginx (`/users/heartbeat`); core uses a TCP probe on the FastCGI port.
 - **`config.enableBackgroundUpdates: true`** (default) is required: the image's base schema lags the app, recent tables (e.g. `bookmarks`) are created by the updates at boot. Without it, authenticated endpoints return 500 (`MissingTableException`) until a manual `cake Admin runUpdates`. **Validated live on minikube** (`/servers/getVersion` → 200 after the updates are applied).
 - `misp-modules`: keep the service named `misp-modules` (the core image default) unless you override the `Plugin.*_services_url` settings.
 - `misp-guard`: provide a real `guard.config` (ruleset), otherwise filtering is non-functional (isolated from core).
@@ -149,11 +155,11 @@ helm upgrade --install misp . -n cti \
 | containerSecurityContext.capabilities.add[2] | string | `"SETGID"` |  |
 | containerSecurityContext.capabilities.add[3] | string | `"DAC_OVERRIDE"` |  |
 | containerSecurityContext.capabilities.add[4] | string | `"AUDIT_WRITE"` |  |
-| containerSecurityContext.capabilities.add[5] | string | `"NET_BIND_SERVICE"` |  |
-| containerSecurityContext.capabilities.add[6] | string | `"FOWNER"` |  |
+| containerSecurityContext.capabilities.add[5] | string | `"FOWNER"` |  |
 | containerSecurityContext.capabilities.drop[0] | string | `"ALL"` |  |
 | containerSecurityContext.privileged | bool | `false` |  |
 | core.affinity | object | `{}` |  |
+| core.fastcgiPort | int | `9002` |  |
 | core.image.digest | string | `""` |  |
 | core.image.repository | string | `"ghcr.io/misp/misp-docker/misp-core"` |  |
 | core.image.tag | string | `"v2.5.48"` |  |
@@ -163,9 +169,8 @@ helm upgrade --install misp . -n cti \
 | core.resources.limits.memory | string | `"4Gi"` |  |
 | core.resources.requests.cpu | string | `"500m"` |  |
 | core.resources.requests.memory | string | `"1Gi"` |  |
-| core.service.httpPort | int | `80` |  |
-| core.service.httpsPort | int | `443` |  |
 | core.service.type | string | `"ClusterIP"` |  |
+| core.statusPort | int | `9003` |  |
 | core.tolerations | list | `[]` |  |
 | externalRedis.existingSecret | string | `""` |  |
 | externalRedis.existingSecretPasswordKey | string | `"redis-password"` |  |
@@ -216,15 +221,27 @@ helm upgrade --install misp . -n cti \
 | metrics.core.securityContext.allowPrivilegeEscalation | bool | `false` |  |
 | metrics.core.securityContext.capabilities.drop[0] | string | `"ALL"` |  |
 | metrics.core.securityContext.privileged | bool | `false` |  |
-| metrics.core.securityContext.runAsGroup | int | `33` |  |
+| metrics.core.securityContext.runAsGroup | int | `65534` |  |
 | metrics.core.securityContext.runAsNonRoot | bool | `true` |  |
-| metrics.core.securityContext.runAsUser | int | `33` |  |
-| metrics.core.statusPort | int | `8999` |  |
+| metrics.core.securityContext.runAsUser | int | `65534` |  |
 | metrics.enabled | bool | `false` |  |
 | metrics.mariadb.enabled | bool | `true` |  |
 | metrics.mariadb.image | string | `""` |  |
 | metrics.mariadb.port | int | `9104` |  |
 | metrics.mariadb.resources | object | `{}` |  |
+| metrics.nginx.enabled | bool | `true` |  |
+| metrics.nginx.image.digest | string | `""` |  |
+| metrics.nginx.image.repository | string | `"nginx/nginx-prometheus-exporter"` |  |
+| metrics.nginx.image.tag | string | `"1.4.2"` |  |
+| metrics.nginx.port | int | `9113` |  |
+| metrics.nginx.resources | object | `{}` |  |
+| metrics.nginx.securityContext.allowPrivilegeEscalation | bool | `false` |  |
+| metrics.nginx.securityContext.capabilities.drop[0] | string | `"ALL"` |  |
+| metrics.nginx.securityContext.privileged | bool | `false` |  |
+| metrics.nginx.securityContext.runAsGroup | int | `65534` |  |
+| metrics.nginx.securityContext.runAsNonRoot | bool | `true` |  |
+| metrics.nginx.securityContext.runAsUser | int | `65534` |  |
+| metrics.nginx.statusPort | int | `8081` |  |
 | metrics.serviceMonitor.annotations | object | `{}` |  |
 | metrics.serviceMonitor.enabled | bool | `false` |  |
 | metrics.serviceMonitor.honorLabels | bool | `false` |  |
@@ -248,6 +265,30 @@ helm upgrade --install misp . -n cti \
 | networkPolicy.coreAllowedFrom | list | `[]` |  |
 | networkPolicy.enabled | bool | `true` |  |
 | networkPolicy.extraEgress | list | `[]` |  |
+| nginx.clientMaxBodySize | string | `"50M"` |  |
+| nginx.contentSecurityPolicy | string | `""` |  |
+| nginx.extraEnv | list | `[]` |  |
+| nginx.hstsMaxAge | string | `""` |  |
+| nginx.image.digest | string | `""` |  |
+| nginx.image.repository | string | `"ghcr.io/misp/misp-docker/misp-nginx"` |  |
+| nginx.image.tag | string | `""` |  |
+| nginx.nodeSelector | object | `{}` |  |
+| nginx.replicas | int | `1` |  |
+| nginx.resources | object | `{}` |  |
+| nginx.securityContext.allowPrivilegeEscalation | bool | `false` |  |
+| nginx.securityContext.capabilities.drop[0] | string | `"ALL"` |  |
+| nginx.securityContext.privileged | bool | `false` |  |
+| nginx.securityContext.runAsGroup | int | `101` |  |
+| nginx.securityContext.runAsNonRoot | bool | `true` |  |
+| nginx.securityContext.runAsUser | int | `101` |  |
+| nginx.service.httpPort | int | `80` |  |
+| nginx.service.httpsPort | int | `443` |  |
+| nginx.service.type | string | `"ClusterIP"` |  |
+| nginx.setRealIpFrom | list | `[]` |  |
+| nginx.tls.autoGenerate | bool | `true` |  |
+| nginx.tls.enabled | bool | `true` |  |
+| nginx.tls.existingSecret | string | `""` |  |
+| nginx.xFrameOptions | string | `"SAMEORIGIN"` |  |
 | persistence.accessModes[0] | string | `"ReadWriteOnce"` |  |
 | persistence.enabled | bool | `true` |  |
 | persistence.existingClaim | string | `""` |  |

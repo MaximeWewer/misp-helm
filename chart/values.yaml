@@ -10,17 +10,22 @@ image:
   pullPolicy: Always
 imagePullSecrets: []
 
-## misp-core: web (nginx + php-fpm) + workers + cron (supervisor), all in one image.
+## misp-core: php-fpm + workers + cron (supervisor). Since MISP v2.5.x the web server
+## was split OUT of this image into a separate misp-nginx (see `nginx` below); core no
+## longer serves 80/443. It listens FastCGI on fastcgiPort and the php-fpm status pool
+## on statusPort (metrics only).
 core:
   image:
     repository: ghcr.io/misp/misp-docker/misp-core
     tag: "v2.5.48"
     digest: ""
   replicas: 1
+  # FastCGI port php-fpm listens on; misp-nginx forwards here (FASTCGI_LISTEN).
+  fastcgiPort: 9002
+  # php-fpm status pool port (path /fpm-status); only opened when metrics are enabled.
+  statusPort: 9003
   service:
     type: ClusterIP
-    httpPort: 80
-    httpsPort: 443
   resources:
     requests:
       cpu: 500m
@@ -31,6 +36,52 @@ core:
   nodeSelector: {}
   tolerations: []
   affinity: {}
+
+## misp-nginx: web frontend. Terminates HTTP/HTTPS and forwards to misp-core over
+## FastCGI (misp-core:fastcgiPort). Separate image since nginx was split out of core;
+## it ships MISP's static webroot itself, so no volume is shared with core. Stateless.
+nginx:
+  image:
+    repository: ghcr.io/misp/misp-docker/misp-nginx
+    # Empty -> Chart.AppVersion. Keep in lockstep with core.image.tag (static assets
+    # are baked per version and must match the running MISP).
+    tag: ""
+    digest: ""
+  replicas: 1
+  service:
+    type: ClusterIP
+    httpPort: 80
+    httpsPort: 443
+  ## TLS at the nginx frontend. The image NEVER self-signs and refuses to start when
+  ## BASE_URL is https:// without a cert present, so the chart supplies one:
+  ##   existingSecret set -> mount that kubernetes.io/tls Secret (cert-manager, etc.)
+  ##   else autoGenerate  -> an init container (openssl) writes a self-signed cert.
+  ## Set enabled=false ONLY with an http:// baseUrl (TLS terminated entirely upstream).
+  tls:
+    enabled: true
+    autoGenerate: true
+    # kubernetes.io/tls Secret (keys tls.crt / tls.key). Takes precedence over autoGenerate.
+    existingSecret: ""
+  # Trust X-Forwarded-For from these CIDRs (ingress/LB) so MISP logs the real client IP.
+  setRealIpFrom: []
+  clientMaxBodySize: "50M"
+  xFrameOptions: "SAMEORIGIN"
+  # Optional hardening headers (empty = not emitted).
+  contentSecurityPolicy: ""
+  hstsMaxAge: ""
+  extraEnv: []
+  resources: {}
+  nodeSelector: {}
+  # nginx runs as uid 101 and binds only high ports (8080/8443/8081) -> no caps needed.
+  securityContext:
+    allowPrivilegeEscalation: false
+    privileged: false
+    runAsNonRoot: true
+    runAsUser: 101
+    runAsGroup: 101
+    capabilities:
+      drop:
+        - ALL
 
 ## misp-modules: enrichment/import/export modules (port 6666).
 modules:
@@ -185,22 +236,22 @@ redis:
 ##
 ## Upstream MISP exposes NO Prometheus endpoint of its own (misp-core, misp-modules,
 ## misp-guard and the SMTP relay ship no /metrics). What IS scrapeable:
-##   - misp-core : php-fpm pool stats, via a php-fpm_exporter sidecar (below)
-##   - mariadb   : mysqld-exporter, run by mariadb-operator (spec.metrics)
-##   - redis     : redis_exporter, run by the CloudPirates subchart (redis.metrics)
+##   - misp-core  : php-fpm pool stats, via a php-fpm_exporter sidecar (below)
+##   - misp-nginx : nginx stub_status, via a nginx-prometheus-exporter sidecar (below)
+##   - mariadb    : mysqld-exporter, run by mariadb-operator (spec.metrics)
+##   - redis      : redis_exporter, run by the CloudPirates subchart (redis.metrics)
 ## Application-level MISP metrics (event/feed/user counts) only exist as an out-of-tree
 ## API poller writing node_exporter textfiles (Truesec/misp-metricsexporter) — not an
 ## HTTP endpoint, so it is not wired here.
 metrics:
-  # Master switch for the exporters this chart owns (misp-core sidecar, MariaDB CR).
+  # Master switch for the exporters this chart owns (core + nginx sidecars, MariaDB CR).
   # Redis is a subchart: its switch cannot be templated, set redis.metrics.* directly.
   enabled: false
 
   ## misp-core: php-fpm pool metrics.
-  ## The image only sets `pm.status_path` when FASTCGI_STATUS_LISTEN is non-empty; the
-  ## status pool then listens on unix:/run/php/php-fpm-status.sock, which the sidecar
-  ## reads through an emptyDir shared with misp-core. nginx additionally serves the raw
-  ## status page on statusPort (cluster-internal only, never exposed by the Service).
+  ## A non-empty FASTCGI_LISTEN_STATUS makes the entrypoint set pm.status_path=/fpm-status;
+  ## with PHP_LISTEN_FPM (always on now) the status pool listens on TCP :statusPort, which
+  ## the sidecar scrapes directly over FastCGI (tcp://127.0.0.1:<statusPort>/fpm-status).
   core:
     enabled: true
     image:
@@ -209,17 +260,36 @@ metrics:
       digest: ""
     # Port the sidecar serves /metrics on.
     port: 9253
-    # nginx port for the plain php-fpm status page (its only role is to switch
-    # pm.status_path on in the image entrypoint).
-    statusPort: 8999
     resources: {}
-    # www-data (33): the status socket inherits listen.owner/group = www-data, mode 0660.
     securityContext:
       allowPrivilegeEscalation: false
       privileged: false
       runAsNonRoot: true
-      runAsUser: 33
-      runAsGroup: 33
+      runAsUser: 65534
+      runAsGroup: 65534
+      capabilities:
+        drop:
+          - ALL
+
+  ## misp-nginx: stub_status metrics. The image already serves stub_status on
+  ## 127.0.0.1:8081/status; the sidecar scrapes it and exposes /metrics.
+  nginx:
+    enabled: true
+    image:
+      repository: nginx/nginx-prometheus-exporter
+      tag: "1.4.2"
+      digest: ""
+    # Port the sidecar serves /metrics on.
+    port: 9113
+    # nginx image's internal stub_status port (NGINX_INTERNAL_STATUS_PORT).
+    statusPort: 8081
+    resources: {}
+    securityContext:
+      allowPrivilegeEscalation: false
+      privileged: false
+      runAsNonRoot: true
+      runAsUser: 65534
+      runAsGroup: 65534
       capabilities:
         drop:
           - ALL
@@ -234,8 +304,9 @@ metrics:
     port: 9104
     resources: {}
 
-  ## NetworkPolicy peers allowed to scrape the misp-core metrics port. Empty = any pod
-  ## in any namespace (metrics port only). Only used when networkPolicy.enabled.
+  ## NetworkPolicy peers allowed to scrape the chart's exporter ports (core + nginx).
+  ## Empty = any pod in any namespace (exporter ports only). Only used when
+  ## networkPolicy.enabled.
   allowedFrom: []
 
   ## ServiceMonitor (prometheus-operator) for the chart-owned exporters.
@@ -269,14 +340,17 @@ serviceAccount:
   annotations: {}
   automountServiceAccountToken: false
 
+## Pod-level security context. Applies to misp-core AND misp-nginx pods; the nginx
+## container overrides runAsNonRoot/runAsUser via nginx.securityContext.
 podSecurityContext:
   seccompProfile:
     type: RuntimeDefault
-  # misp-core runs nginx + php-fpm as root (supervisor); enable after verifying uids.
+  # misp-core runs php-fpm + cron as root (supervisor); enable after verifying uids.
   runAsNonRoot: false
 
-## Container hardening. misp-core needs some caps for nginx/php-fpm/cron; keep a
-## conservative drop set rather than ALL to avoid breaking the supervisor stack.
+## Container hardening for misp-core (php-fpm/cron, root via supervisor). Conservative
+## drop set rather than ALL to avoid breaking the supervisor stack. (misp-nginx has its
+## own hardened context under nginx.securityContext.)
 containerSecurityContext:
   allowPrivilegeEscalation: false
   privileged: false
@@ -289,10 +363,6 @@ containerSecurityContext:
       - SETGID
       - DAC_OVERRIDE
       - AUDIT_WRITE
-      # nginx binds privileged ports 80/443; without this it fails with
-      # "bind() to 0.0.0.0:443 failed (13: Permission denied)" since drop:[ALL]
-      # removes the cap even for root.
-      - NET_BIND_SERVICE
       # entrypoint chmods seeded files (tmp/files) owned by www-data while running
       # as root; without FOWNER chmod-on-unowned fails with "Operation not permitted".
       - FOWNER

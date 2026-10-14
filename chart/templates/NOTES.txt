@@ -1,6 +1,6 @@
 MISP deployed: {{ include "misp.fullname" . }}
 
-Components: core{{ if .Values.modules.enabled }}, modules{{ end }}{{ if .Values.mail.enabled }}, mail{{ end }}{{ if .Values.guard.enabled }}, guard{{ end }}
+Components: core, nginx{{ if .Values.modules.enabled }}, modules{{ end }}{{ if .Values.mail.enabled }}, mail{{ end }}{{ if .Values.guard.enabled }}, guard{{ end }}
 Dependencies:
 {{- if .Values.mariadb.enabled }}
   - MariaDB (mariadb-operator): MariaDB/{{ include "misp.mariadb.fullname" . }}
@@ -15,12 +15,21 @@ Dependencies:
 WARNING: config.baseUrl is NOT set — required (public MISP URL).
 {{- end }}
 
-GUI access:
+GUI access (served by the misp-nginx frontend):
 {{- if .Values.ingress.enabled }}
   https://{{ .Values.ingress.host }}
+  {{- if .Values.nginx.tls.enabled }}
+  NOTE: the backend is HTTPS (self-signed); set your controller's backend-protocol
+  annotation to HTTPS (e.g. nginx.ingress.kubernetes.io/backend-protocol: "HTTPS").
+  {{- end }}
 {{- else }}
-  kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "misp.core.fullname" . }} 8443:443
+{{- if .Values.nginx.tls.enabled }}
+  kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "misp.nginx.fullname" . }} 8443:{{ .Values.nginx.service.httpsPort }}
   then https://localhost:8443 (self-signed cert)
+{{- else }}
+  kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "misp.nginx.fullname" . }} 8080:{{ .Values.nginx.service.httpPort }}
+  then http://localhost:8080
+{{- end }}
 {{- end }}
 
 {{- if not .Values.config.existingSecret }}
@@ -36,6 +45,9 @@ Metrics:
 {{- if .Values.metrics.core.enabled }}
   - misp-core (php-fpm): svc/{{ include "misp.core.fullname" . }}-metrics:{{ .Values.metrics.core.port }}/metrics
 {{- end }}
+{{- if .Values.metrics.nginx.enabled }}
+  - misp-nginx (stub_status): svc/{{ include "misp.nginx.fullname" . }}-metrics:{{ .Values.metrics.nginx.port }}/metrics
+{{- end }}
 {{- if and .Values.mariadb.enabled .Values.metrics.mariadb.enabled }}
   - mariadb (mysqld-exporter): deployed by mariadb-operator, port {{ .Values.metrics.mariadb.port }}
 {{- end }}
@@ -49,7 +61,8 @@ Metrics:
 {{- end }}
 
 Reminders:
-  - core = web + workers + cron (supervisor) in a single pod (RWO, strategy Recreate).
+  - core = php-fpm + workers + cron (supervisor), RWO (strategy Recreate); nginx is a
+    separate stateless frontend that forwards to core over FastCGI.
   - MISP fetches external feeds: allow outbound egress via networkPolicy.extraEgress.
   - misp-guard needs a real filtering config.json (guard.config) to be useful.
   - Slow first boot (DB migrations + GPG generation): tolerant startupProbe.
