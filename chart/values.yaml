@@ -52,6 +52,9 @@ nginx:
     type: ClusterIP
     httpPort: 80
     httpsPort: 443
+    # e.g. traefik.ingress.kubernetes.io/service.serverstransport to re-encrypt to the
+    # self-signed backend.
+    annotations: {}
   ## TLS at the nginx frontend. The image NEVER self-signs and refuses to start when
   ## BASE_URL is https:// without a cert present, so the chart supplies one:
   ##   existingSecret set -> mount that kubernetes.io/tls Secret (cert-manager, etc.)

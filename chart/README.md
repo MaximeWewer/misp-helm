@@ -336,6 +336,7 @@ With `networkPolicy.enabled`, the core also accepts port 443 from the chart pods
 | nginx.securityContext.runAsGroup | int | `101` |  |
 | nginx.securityContext.runAsNonRoot | bool | `true` |  |
 | nginx.securityContext.runAsUser | int | `101` |  |
+| nginx.service.annotations | object | `{}` | e.g. traefik.ingress.kubernetes.io/service.serverstransport to re-encrypt to the self-signed backend. |
 | nginx.service.httpPort | int | `80` |  |
 | nginx.service.httpsPort | int | `443` |  |
 | nginx.service.type | string | `"ClusterIP"` |  |
