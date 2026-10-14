@@ -5,6 +5,10 @@ metadata:
   labels:
     app.kubernetes.io/component: nginx
     {{- include "misp.labels" . | nindent 4 }}
+  {{- with .Values.nginx.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
   type: {{ .Values.nginx.service.type }}
   ports:

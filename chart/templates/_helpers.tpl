@@ -90,3 +90,80 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- printf "%s:%s" $ref ($img.tag | default .root.Chart.AppVersion) -}}
 {{- end -}}
 {{- end }}
+
+{{/* MISP URL used by the bootstrap Job (in-cluster misp-nginx Service by default,
+     https when nginx.tls.enabled; self-signed cert, verification off unless
+     bootstrap.verifyTls). */}}
+{{- define "misp.bootstrap.url" -}}
+{{- if .Values.bootstrap.url -}}
+{{- .Values.bootstrap.url | trimSuffix "/" -}}
+{{- else -}}
+{{- if .Values.nginx.tls.enabled -}}
+{{- printf "https://%s:%v" (include "misp.nginx.fullname" .) .Values.nginx.service.httpsPort -}}
+{{- else -}}
+{{- printf "http://%s:%v" (include "misp.nginx.fullname" .) .Values.nginx.service.httpPort -}}
+{{- end -}}
+{{- end -}}
+{{- end }}
+
+{{/* Pod spec shared by the bootstrap Job and the feeds-fetch CronJob.
+     dict {root, mode}. Pods carry the chart selector labels so the chart
+     NetworkPolicy lets them reach misp-core. */}}
+{{- define "misp.bootstrap.podSpec" -}}
+{{- $root := .root -}}
+{{- $b := $root.Values.bootstrap -}}
+serviceAccountName: {{ include "misp.serviceAccountName" $root }}
+automountServiceAccountToken: false
+{{- with $root.Values.imagePullSecrets }}
+imagePullSecrets:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 65534
+  runAsGroup: 65534
+  seccompProfile:
+    type: RuntimeDefault
+containers:
+  - name: bootstrap
+    image: {{ include "misp.image" (dict "img" $b.image "root" $root) | quote }}
+    imagePullPolicy: {{ $root.Values.image.pullPolicy }}
+    command: ["python3", "-I", "/bootstrap/bootstrap.py"]
+    env:
+      - name: MODE
+        value: {{ .mode | quote }}
+      - name: MISP_URL
+        value: {{ include "misp.bootstrap.url" $root | quote }}
+      - name: MISP_VERIFY_TLS
+        value: {{ $b.verifyTls | quote }}
+      - name: WAIT_TIMEOUT
+        value: {{ $b.waitTimeoutSeconds | quote }}
+      - name: BOOTSTRAP_CONFIG
+        value: /bootstrap/config.json
+      - name: PYTHONDONTWRITEBYTECODE
+        value: "1"
+      - name: MISP_KEY
+        valueFrom:
+          secretKeyRef:
+            name: {{ include "misp.secretName" $root }}
+            key: admin-key
+    securityContext:
+      allowPrivilegeEscalation: false
+      privileged: false
+      readOnlyRootFilesystem: true
+      capabilities:
+        drop:
+          - ALL
+    {{- with $b.resources }}
+    resources:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+    volumeMounts:
+      - name: bootstrap
+        mountPath: /bootstrap
+        readOnly: true
+volumes:
+  - name: bootstrap
+    configMap:
+      name: {{ printf "%s-bootstrap" (include "misp.fullname" $root) }}
+{{- end }}

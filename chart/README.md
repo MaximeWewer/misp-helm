@@ -90,6 +90,36 @@ helm upgrade --install misp . -n cti \
 - With `networkPolicy.enabled`, an ingress rule opens the exporter ports — `metrics.allowedFrom` restricts the peers (empty = any namespace, exporter ports only).
 - Application-level MISP metrics (event/feed/user counts) only exist out of tree as an API poller writing node_exporter textfiles ([Truesec/misp-metricsexporter](https://github.com/Truesec/misp-metricsexporter)) — not an HTTP endpoint, so it is not wired here.
 
+## Bootstrap (configuration as code)
+
+`bootstrap.enabled: true` renders a Job that reconciles MISP through its REST API with the chart admin key (`admin-key`), against the in-cluster misp-nginx Service (`https://<release>-misp-nginx:443` when `nginx.tls.enabled`, else http:80; self-signed, override with `bootstrap.url`). The script (`files/bootstrap.py`, stdlib Python) is idempotent: it only writes differences and exits non-zero on any error. The Job name hashes its config, so a values change re-runs it under Helm and Argo CD alike.
+
+| Key | Effect |
+|-----|--------|
+| `bootstrap.feeds` | Create/update feeds, matched on `url` then `name` (`enabled`, `caching_enabled`, `source_format`, ...). Unlisted feeds are untouched |
+| `bootstrap.taxonomies` | Enable these namespaces (and create their tags unless `taxonomiesAddTags: false`). `disableOtherTaxonomies` disables the rest |
+| `bootstrap.warninglists` / `noticelists` | Enable these lists by name. `updateWarninglists` / `updateNoticelists` / `updateGalaxies` pull the latest definitions first |
+| `bootstrap.serverSettings` | `setting: value` map applied with `/servers/serverSettingsEdit` |
+| `bootstrap.organisations` | Organisations created when missing (matched on `name`) |
+| `bootstrap.fetchOnSync` | Fetch + cache all enabled feeds at the end of each run |
+| `bootstrap.feedsSchedule` | Cron of a CronJob that fetches + caches all enabled feeds (MISP scheduled tasks are otherwise UI-only) |
+
+```yaml
+bootstrap:
+  enabled: true
+  feeds:
+    - name: CIRCL OSINT Feed
+      provider: CIRCL
+      url: https://www.circl.lu/doc/misp/feed-osint
+      source_format: misp
+      enabled: true
+      caching_enabled: true
+  taxonomies: [tlp, PAP, workflow]
+  feedsSchedule: "0 */6 * * *"
+```
+
+With `networkPolicy.enabled`, the core also accepts port 443 from the chart pods so the Job can reach the API. Run the script locally against an instance with `DRY_RUN=true` to only log the writes it would make.
+
 ## Main values
 
 | Key | Default | Description |
@@ -133,6 +163,31 @@ helm upgrade --install misp . -n cti \
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
+| bootstrap.backoffLimit | int | `6` |  |
+| bootstrap.disableOtherTaxonomies | bool | `false` |  |
+| bootstrap.enabled | bool | `false` |  |
+| bootstrap.feeds | list | `[]` |  |
+| bootstrap.feedsSchedule | string | `""` |  |
+| bootstrap.fetchOnSync | bool | `false` |  |
+| bootstrap.image.digest | string | `""` |  |
+| bootstrap.image.repository | string | `"python"` |  |
+| bootstrap.image.tag | string | `"3.13-alpine"` |  |
+| bootstrap.noticelists | list | `[]` |  |
+| bootstrap.organisations | list | `[]` |  |
+| bootstrap.resources.limits.memory | string | `"128Mi"` |  |
+| bootstrap.resources.requests.cpu | string | `"10m"` |  |
+| bootstrap.resources.requests.memory | string | `"32Mi"` |  |
+| bootstrap.serverSettings | object | `{}` |  |
+| bootstrap.taxonomies | list | `[]` |  |
+| bootstrap.taxonomiesAddTags | bool | `true` |  |
+| bootstrap.ttlSecondsAfterFinished | int | `600` |  |
+| bootstrap.updateGalaxies | bool | `false` |  |
+| bootstrap.updateNoticelists | bool | `false` |  |
+| bootstrap.updateWarninglists | bool | `false` |  |
+| bootstrap.url | string | `""` |  |
+| bootstrap.verifyTls | bool | `false` |  |
+| bootstrap.waitTimeoutSeconds | int | `1800` |  |
+| bootstrap.warninglists | list | `[]` |  |
 | config.adminEmail | string | `"admin@admin.test"` |  |
 | config.adminOrg | string | `"ORGNAME"` |  |
 | config.baseUrl | string | `""` |  |
@@ -281,6 +336,7 @@ helm upgrade --install misp . -n cti \
 | nginx.securityContext.runAsGroup | int | `101` |  |
 | nginx.securityContext.runAsNonRoot | bool | `true` |  |
 | nginx.securityContext.runAsUser | int | `101` |  |
+| nginx.service.annotations | object | `{}` | e.g. traefik.ingress.kubernetes.io/service.serverstransport to re-encrypt to the self-signed backend. |
 | nginx.service.httpPort | int | `80` |  |
 | nginx.service.httpsPort | int | `443` |  |
 | nginx.service.type | string | `"ClusterIP"` |  |

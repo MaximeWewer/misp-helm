@@ -151,6 +151,48 @@
         "existingSecretPasswordKey": { "type": "string" }
       }
     },
+    "bootstrap": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "image": { "type": "object", "properties": { "repository": { "type": "string" }, "tag": { "type": "string" }, "digest": { "type": "string" } } },
+        "url": { "type": "string" },
+        "verifyTls": { "type": "boolean" },
+        "waitTimeoutSeconds": { "type": "integer", "minimum": 0 },
+        "backoffLimit": { "type": "integer", "minimum": 0 },
+        "ttlSecondsAfterFinished": { "type": ["integer", "null"], "minimum": 0 },
+        "resources": { "type": "object" },
+        "feeds": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "url"],
+            "properties": {
+              "name": { "type": "string" },
+              "provider": { "type": "string" },
+              "url": { "type": "string" },
+              "source_format": { "type": "string", "enum": ["misp", "freetext", "csv"] },
+              "enabled": { "type": "boolean" },
+              "caching_enabled": { "type": "boolean" },
+              "input_source": { "type": "string", "enum": ["network", "local"] },
+              "lookup_visible": { "type": "boolean" }
+            }
+          }
+        },
+        "taxonomies": { "type": "array", "items": { "type": "string" } },
+        "taxonomiesAddTags": { "type": "boolean" },
+        "disableOtherTaxonomies": { "type": "boolean" },
+        "warninglists": { "type": "array", "items": { "type": "string" } },
+        "updateWarninglists": { "type": "boolean" },
+        "noticelists": { "type": "array", "items": { "type": "string" } },
+        "updateNoticelists": { "type": "boolean" },
+        "updateGalaxies": { "type": "boolean" },
+        "serverSettings": { "type": "object" },
+        "organisations": { "type": "array", "items": { "type": "object", "required": ["name"] } },
+        "fetchOnSync": { "type": "boolean" },
+        "feedsSchedule": { "type": "string" }
+      }
+    },
     "serviceAccount": {
       "type": "object",
       "properties": {

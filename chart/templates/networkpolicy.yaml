@@ -43,6 +43,13 @@ spec:
         {{- end }}
         - protocol: TCP
           port: 25
+        {{- if .Values.bootstrap.enabled }}
+        # bootstrap Job -> misp-nginx API.
+        - protocol: TCP
+          port: 8080
+        - protocol: TCP
+          port: 8443
+        {{- end }}
     {{- if .Values.metrics.enabled }}
     # Prometheus -> chart exporters (core + nginx sidecars). Empty allowedFrom = any
     # pod/namespace, but on the exporter ports only.
