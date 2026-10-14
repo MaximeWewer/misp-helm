@@ -334,6 +334,78 @@ externalRedis:
   existingSecret: ""
   existingSecretPasswordKey: "redis-password"
 
+## Declarative MISP configuration, reconciled through the REST API by a Job
+## (templates/bootstrap.yaml, script files/bootstrap.py) with the chart admin key.
+## Idempotent: only differences are written. The Job name hashes its config, so any
+## change here re-runs it (Helm and Argo CD alike).
+bootstrap:
+  enabled: false
+  # Image running the stdlib-only Python script.
+  image:
+    repository: python
+    tag: "3.13-alpine"
+    digest: ""
+  # MISP URL. Empty = the misp-nginx Service (https:<nginx.service.httpsPort> when nginx.tls.enabled, else http).
+  url: ""
+  # Verify the core TLS certificate (the in-cluster core uses a self-signed one).
+  verifyTls: false
+  # How long the Job waits for MISP to answer /servers/getVersion.
+  waitTimeoutSeconds: 1800
+  backoffLimit: 6
+  # Reaps the finished Job. With Argo CD selfHeal the (unchanged) Job is then
+  # re-created and re-run, which acts as a periodic drift correction. null = keep it.
+  ttlSecondsAfterFinished: 600
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      memory: 128Mi
+
+  # Feeds, matched on url (then name). Fields: name, provider, url, source_format
+  # (misp|freetext|csv), enabled, caching_enabled, distribution, sharing_group_id,
+  # tag_id, tag_collection_id, event_id, input_source (network|local), lookup_visible,
+  # publish, override_ids, delta_merge, fixed_event, lock_events, delete_local_file,
+  # headers, rules, pull_rules, settings, orgc_id. Feeds not listed are left untouched.
+  feeds: []
+  #  - name: CIRCL OSINT Feed
+  #    provider: CIRCL
+  #    url: https://www.circl.lu/doc/misp/feed-osint
+  #    source_format: misp
+  #    enabled: true
+  #    caching_enabled: true
+
+  # Taxonomy namespaces to enable (their tags are created unless taxonomiesAddTags=false).
+  taxonomies: []
+  taxonomiesAddTags: true
+  # Disable every enabled taxonomy not listed above.
+  disableOtherTaxonomies: false
+
+  # Warning lists to enable, by name. updateWarninglists pulls the latest lists first.
+  warninglists: []
+  updateWarninglists: false
+  # Notice lists to enable, by name (e.g. gdpr).
+  noticelists: []
+  updateNoticelists: false
+  # Pull the latest galaxies.
+  updateGalaxies: false
+
+  # MISP server settings: setting -> value (POST /servers/serverSettingsEdit).
+  serverSettings: {}
+  #  MISP.welcome_text_top: "Welcome"
+  #  Security.password_policy_length: 14
+
+  # Organisations created when missing (matched on name).
+  organisations: []
+  #  - name: Partner CERT
+  #    description: Sharing partner
+  #    local: false
+
+  # Trigger fetch + cache of all enabled feeds at the end of each sync.
+  fetchOnSync: false
+  # Cron for a CronJob that fetches + caches all enabled feeds. Empty = no CronJob.
+  feedsSchedule: ""
+
 serviceAccount:
   create: true
   name: ""
