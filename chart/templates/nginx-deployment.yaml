@@ -1,0 +1,150 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "misp.nginx.fullname" . }}
+  labels:
+    app.kubernetes.io/component: nginx
+    {{- include "misp.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.nginx.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: nginx
+      {{- include "misp.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: nginx
+        {{- include "misp.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "misp.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automountServiceAccountToken }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- if and .Values.nginx.tls.enabled .Values.nginx.tls.autoGenerate (not .Values.nginx.tls.existingSecret) }}
+      initContainers:
+        # The misp-nginx image never self-signs; generate a cert so it can serve HTTPS
+        # with an https:// BASE_URL. Replace via nginx.tls.existingSecret in production.
+        - name: gen-cert
+          image: {{ include "misp.image" (dict "img" .Values.nginx.image "root" .) | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.nginx.securityContext | nindent 12 }}
+          command: ["sh", "-c"]
+          args:
+            - |
+              CN='{{ .Values.config.baseUrl | trimPrefix "https://" | trimPrefix "http://" | trimSuffix "/" | default "misp" }}'
+              openssl req -x509 -nodes -newkey rsa:2048 -days 3650 \
+                -keyout /etc/nginx/certs/key.pem -out /etc/nginx/certs/cert.pem \
+                -subj "/CN=${CN}" -addext "subjectAltName=DNS:${CN}"
+          volumeMounts:
+            - name: certs
+              mountPath: /etc/nginx/certs
+      {{- end }}
+      containers:
+        - name: misp-nginx
+          image: {{ include "misp.image" (dict "img" .Values.nginx.image "root" .) | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.nginx.securityContext | nindent 12 }}
+          env:
+            {{- include "misp.nginxEnv" . | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+            {{- if .Values.nginx.tls.enabled }}
+            - name: https
+              containerPort: 8443
+              protocol: TCP
+            {{- end }}
+          {{- $probePort := ternary "https" "http" .Values.nginx.tls.enabled }}
+          {{- $probeScheme := ternary "HTTPS" "HTTP" .Values.nginx.tls.enabled }}
+          # Exercises the full path nginx -> misp-core FastCGI; green only once the app
+          # answers (DB migrations done). Tolerant startup for slow first boot.
+          startupProbe:
+            httpGet:
+              path: /users/heartbeat
+              port: {{ $probePort }}
+              scheme: {{ $probeScheme }}
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            failureThreshold: 40
+          readinessProbe:
+            httpGet:
+              path: /users/heartbeat
+              port: {{ $probePort }}
+              scheme: {{ $probeScheme }}
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /users/heartbeat
+              port: {{ $probePort }}
+              scheme: {{ $probeScheme }}
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 6
+          resources:
+            {{- toYaml .Values.nginx.resources | nindent 12 }}
+          {{- if .Values.nginx.tls.enabled }}
+          volumeMounts:
+            - name: certs
+              mountPath: /etc/nginx/certs
+              readOnly: true
+          {{- end }}
+        {{- if and .Values.metrics.enabled .Values.metrics.nginx.enabled }}
+        # Scrapes nginx stub_status served on 127.0.0.1:statusPort/status (same pod).
+        - name: metrics
+          image: {{ include "misp.image" (dict "img" .Values.metrics.nginx.image "root" .) | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.metrics.nginx.securityContext | nindent 12 }}
+          args:
+            - --nginx.scrape-uri=http://127.0.0.1:{{ .Values.metrics.nginx.statusPort }}/status
+            - --web.listen-address=:{{ .Values.metrics.nginx.port }}
+          ports:
+            - name: metrics
+              containerPort: {{ .Values.metrics.nginx.port }}
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          resources:
+            {{- toYaml .Values.metrics.nginx.resources | nindent 12 }}
+        {{- end }}
+      {{- if .Values.nginx.tls.enabled }}
+      volumes:
+        - name: certs
+          {{- if .Values.nginx.tls.existingSecret }}
+          secret:
+            secretName: {{ .Values.nginx.tls.existingSecret | quote }}
+            items:
+              - key: tls.crt
+                path: cert.pem
+              - key: tls.key
+                path: key.pem
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+      {{- end }}
+      {{- with .Values.nginx.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.core.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.core.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

@@ -51,33 +51,32 @@ spec:
             {{- include "misp.coreEnv" . | nindent 12 }}
           {{- include "misp.coreEnvFrom" . | nindent 10 }}
           ports:
-            - name: http
-              containerPort: 80
+            - name: fastcgi
+              containerPort: {{ .Values.core.fastcgiPort }}
               protocol: TCP
-            - name: https
-              containerPort: 443
+            {{- if and .Values.metrics.enabled .Values.metrics.core.enabled }}
+            - name: fpm-status
+              containerPort: {{ .Values.core.statusPort }}
               protocol: TCP
+            {{- end }}
+          # php-fpm only (no HTTP in this pod anymore). TCP readiness on the FastCGI
+          # port; application readiness (DB migrations) is probed on misp-nginx via
+          # /users/heartbeat.
           startupProbe:
-            httpGet:
-              path: /users/heartbeat
-              port: https
-              scheme: HTTPS
+            tcpSocket:
+              port: fastcgi
             initialDelaySeconds: 30
             periodSeconds: 15
             failureThreshold: 40
           readinessProbe:
-            httpGet:
-              path: /users/heartbeat
-              port: https
-              scheme: HTTPS
+            tcpSocket:
+              port: fastcgi
             periodSeconds: 15
             timeoutSeconds: 5
             failureThreshold: 6
           livenessProbe:
-            httpGet:
-              path: /users/heartbeat
-              port: https
-              scheme: HTTPS
+            tcpSocket:
+              port: fastcgi
             periodSeconds: 30
             timeoutSeconds: 5
             failureThreshold: 6
@@ -96,13 +95,8 @@ spec:
             - name: data
               mountPath: /var/www/MISP/app/tmp/logs
               subPath: logs
-            {{- if and .Values.metrics.enabled .Values.metrics.core.enabled }}
-            - name: php-run
-              mountPath: /run/php
-            {{- end }}
         {{- if and .Values.metrics.enabled .Values.metrics.core.enabled }}
-        # Reads the php-fpm status pool over the socket shared via the php-run emptyDir.
-        # FastCGI directly — no nginx hop (see FASTCGI_STATUS_LISTEN in _env.tpl).
+        # Scrapes the php-fpm status pool directly over FastCGI (TCP, same pod).
         - name: metrics
           image: {{ include "misp.image" (dict "img" .Values.metrics.core.image "root" .) | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
@@ -110,7 +104,7 @@ spec:
             {{- toYaml .Values.metrics.core.securityContext | nindent 12 }}
           args:
             - --phpfpm.scrape-uri
-            - "unix:///run/php/php-fpm-status.sock;/status"
+            - "tcp://127.0.0.1:{{ .Values.core.statusPort }}/fpm-status"
             - --web.listen-address
             - ":{{ .Values.metrics.core.port }}"
           ports:
@@ -125,15 +119,8 @@ spec:
             periodSeconds: 30
           resources:
             {{- toYaml .Values.metrics.core.resources | nindent 12 }}
-          volumeMounts:
-            - name: php-run
-              mountPath: /run/php
         {{- end }}
       volumes:
-        {{- if and .Values.metrics.enabled .Values.metrics.core.enabled }}
-        - name: php-run
-          emptyDir: {}
-        {{- end }}
         - name: data
           {{- if .Values.persistence.enabled }}
           persistentVolumeClaim:

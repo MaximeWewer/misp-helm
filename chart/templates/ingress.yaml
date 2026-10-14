@@ -1,10 +1,16 @@
 {{- if .Values.ingress.enabled }}
+{{- /*
+Backend is the misp-nginx frontend. With nginx.tls.enabled the backend speaks HTTPS
+(self-signed), so the ingress controller must re-encrypt: set the backend-protocol
+annotation (nginx: nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"; traefik:
+a serverstransport, etc.) under ingress.annotations.
+*/}}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: {{ include "misp.core.fullname" . }}
+  name: {{ include "misp.nginx.fullname" . }}
   labels:
-    app.kubernetes.io/component: core
+    app.kubernetes.io/component: nginx
     {{- include "misp.labels" . | nindent 4 }}
   {{- with .Values.ingress.annotations }}
   annotations:
@@ -26,7 +32,7 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: {{ include "misp.core.fullname" . }}
+                name: {{ include "misp.nginx.fullname" . }}
                 port:
-                  number: {{ .Values.core.service.httpPort }}
+                  number: {{ if .Values.nginx.tls.enabled }}{{ .Values.nginx.service.httpsPort }}{{ else }}{{ .Values.nginx.service.httpPort }}{{ end }}
 {{- end }}

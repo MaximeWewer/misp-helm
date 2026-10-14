@@ -14,6 +14,31 @@
     },
     "imagePullSecrets": { "type": "array" },
     "core": { "type": "object" },
+    "nginx": {
+      "type": "object",
+      "properties": {
+        "image": { "type": "object" },
+        "replicas": { "type": "integer" },
+        "service": { "type": "object" },
+        "tls": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "autoGenerate": { "type": "boolean" },
+            "existingSecret": { "type": "string" }
+          }
+        },
+        "setRealIpFrom": { "type": "array" },
+        "clientMaxBodySize": { "type": "string" },
+        "xFrameOptions": { "type": "string" },
+        "contentSecurityPolicy": { "type": "string" },
+        "hstsMaxAge": { "type": ["string", "integer"] },
+        "extraEnv": { "type": "array" },
+        "resources": { "type": "object" },
+        "nodeSelector": { "type": "object" },
+        "securityContext": { "type": "object" }
+      }
+    },
     "modules": { "type": "object", "properties": { "enabled": { "type": "boolean" }, "serviceName": { "type": "string" } } },
     "mail": { "type": "object", "properties": { "enabled": { "type": "boolean" } } },
     "guard": { "type": "object", "properties": { "enabled": { "type": "boolean" }, "config": { "type": "string" } } },
@@ -69,6 +94,16 @@
       "properties": {
         "enabled": { "type": "boolean" },
         "core": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "image": { "type": "object" },
+            "port": { "type": "integer" },
+            "resources": { "type": "object" },
+            "securityContext": { "type": "object" }
+          }
+        },
+        "nginx": {
           "type": "object",
           "properties": {
             "enabled": { "type": "boolean" },
