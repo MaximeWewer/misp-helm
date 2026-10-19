@@ -310,7 +310,7 @@ With `networkPolicy.enabled`, the core also accepts port 443 from the chart pods
 | modules.enabled | bool | `true` |  |
 | modules.image.digest | string | `""` |  |
 | modules.image.repository | string | `"ghcr.io/misp/misp-docker/misp-modules"` |  |
-| modules.image.tag | string | `"v3.0.11"` |  |
+| modules.image.tag | string | `"v3.0.12"` |  |
 | modules.nodeSelector | object | `{}` |  |
 | modules.port | int | `6666` |  |
 | modules.replicas | int | `1` |  |
@@ -336,7 +336,7 @@ With `networkPolicy.enabled`, the core also accepts port 443 from the chart pods
 | nginx.securityContext.runAsGroup | int | `101` |  |
 | nginx.securityContext.runAsNonRoot | bool | `true` |  |
 | nginx.securityContext.runAsUser | int | `101` |  |
-| nginx.service.annotations | object | `{}` | e.g. traefik.ingress.kubernetes.io/service.serverstransport to re-encrypt to the self-signed backend. |
+| nginx.service.annotations | object | `{}` |  |
 | nginx.service.httpPort | int | `80` |  |
 | nginx.service.httpsPort | int | `443` |  |
 | nginx.service.type | string | `"ClusterIP"` |  |
