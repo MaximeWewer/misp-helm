@@ -2,7 +2,7 @@ apiVersion: v2
 name: misp
 description: MISP (threat intelligence sharing platform) — hardened Helm chart, operator-first deps (MariaDB via mariadb-operator, Redis via CloudPirates chart)
 type: application
-version: 2.5.50-19-10-2026
+version: 2.5.50-26-10-2026
 appVersion: "v2.5.50"
 home: https://www.misp-project.org/
 sources:

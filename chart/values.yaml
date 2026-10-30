@@ -95,7 +95,7 @@ modules:
   serviceName: "misp-modules"
   image:
     repository: ghcr.io/misp/misp-docker/misp-modules
-    tag: "v3.0.12"
+    tag: "v3.1.1"
     digest: ""
   replicas: 1
   port: 6666
@@ -120,7 +120,7 @@ guard:
   enabled: true
   image:
     repository: ghcr.io/misp/misp-docker/misp-guard
-    tag: "v1.2"
+    tag: "v1.3"
     digest: ""
   port: 8888
   args: ""

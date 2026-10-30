@@ -237,7 +237,7 @@ With `networkPolicy.enabled`, the core also accepts port 443 from the chart pods
 | guard.enabled | bool | `true` |  |
 | guard.image.digest | string | `""` |  |
 | guard.image.repository | string | `"ghcr.io/misp/misp-docker/misp-guard"` |  |
-| guard.image.tag | string | `"v1.2"` |  |
+| guard.image.tag | string | `"v1.3"` |  |
 | guard.nodeSelector | object | `{}` |  |
 | guard.port | int | `8888` |  |
 | guard.resources | object | `{}` |  |
@@ -310,7 +310,7 @@ With `networkPolicy.enabled`, the core also accepts port 443 from the chart pods
 | modules.enabled | bool | `true` |  |
 | modules.image.digest | string | `""` |  |
 | modules.image.repository | string | `"ghcr.io/misp/misp-docker/misp-modules"` |  |
-| modules.image.tag | string | `"v3.0.12"` |  |
+| modules.image.tag | string | `"v3.1.1"` |  |
 | modules.nodeSelector | object | `{}` |  |
 | modules.port | int | `6666` |  |
 | modules.replicas | int | `1` |  |
