@@ -157,7 +157,7 @@ With `networkPolicy.enabled`, the core also accepts port 443 from the chart pods
 
 | Repository | Name | Version |
 |------------|------|---------|
-| oci://registry-1.docker.io/cloudpirates | redis | 0.38.* |
+| oci://registry-1.docker.io/cloudpirates | redis | 0.39.* |
 
 ## Values
 
